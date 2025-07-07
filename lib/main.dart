@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:masquarade_app/env.dart';
 import 'package:masquarade_app/utils/debug_telegram.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
@@ -18,11 +19,7 @@ import 'services/supabase_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Supabase.initialize(
-    url: 'https://pedqpjmdhkcdssfshpzb.supabase.co',
-    anonKey:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBlZHFwam1kaGtjZHNzZnNocHpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgwNzg2MjEsImV4cCI6MjA2MzY1NDYyMX0.TpKphT5OsfflOP6-ECNmcWckYsvSwRXzRkRhIevUG-I',
-  );
+  await Supabase.initialize(url: supabase_url, anonKey: supabase_anonKey);
 
   final service = SupabaseService(Supabase.instance.client);
   // Убрали вызов checkViolationsTable, так как он должен быть в SupabaseService
