@@ -15,7 +15,8 @@ import '../blocs/domain/domain_state.dart';
 import '../blocs/masquerade/masquerade_bloc.dart';
 import 'violation_detail_screen.dart';
 import 'profile_screen.dart';
-import 'masquerade_violation_screen.dart'; // ✅ добавлен импорт
+import 'masquerade_violation_screen.dart';
+import 'domain_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final ProfileModel profile;
@@ -109,6 +110,7 @@ class _HomeScreenState extends State<HomeScreen> {
           boundaryPoints: [],
           isNeutral: true,
           openViolationsCount: 0,
+          ownerId: 'нет',
         ),
       );
     } catch (_) {
@@ -139,11 +141,24 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final profile = widget.profile;
+    final domainState = context.watch<DomainBloc>().state;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Главная'),
         actions: [
+          if (profile.isDomainOwner)
+            IconButton(
+              icon: const Icon(Icons.location_city),
+              tooltip: 'Мой домен',
+              onPressed: () {
+                context.read<DomainBloc>().add(RefreshDomains());
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DomainScreen()),
+                );
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.account_circle),
             onPressed: _openProfileScreen,
@@ -167,6 +182,29 @@ class _HomeScreenState extends State<HomeScreen> {
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.masquerade.app',
                 ),
+                if (domainState is DomainsLoaded)
+                  PolygonLayer(
+                    polygons: domainState.domains
+                        .where((d) => d.boundaryPoints.length >= 3)
+                        .map((domain) {
+                          Color color;
+                          if (domain.ownerId == profile.id) {
+                            color = Colors.blue;
+                          } else if (domain.isNeutral) {
+                            color = Colors.grey;
+                          } else {
+                            color = Colors.red;
+                          }
+
+                          return Polygon(
+                            points: domain.boundaryPoints,
+                            borderColor: color,
+                            borderStrokeWidth: 2,
+                            color: color.withOpacity(0.3),
+                          );
+                        })
+                        .toList(),
+                  ),
                 if (_position != null)
                   MarkerLayer(
                     markers: [

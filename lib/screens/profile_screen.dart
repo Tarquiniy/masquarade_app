@@ -51,11 +51,11 @@ class ProfileScreen extends StatelessWidget {
 
         const SizedBox(height: 12),
         _title('Голод'),
-        Text('${profile.hunger}', style: _valueStyle()),
+        Text('${profile.hunger}/6', style: _valueStyle()),
 
         const SizedBox(height: 12),
         _title('Влияние'),
-        Text('${profile.influence}', style: _valueStyle()),
+        Text('${profile.influence}/7', style: _valueStyle()),
 
         const SizedBox(height: 12),
         _title('Домен'),

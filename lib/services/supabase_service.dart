@@ -156,6 +156,7 @@ class SupabaseService {
             longitude: 0,
             boundaryPoints: [],
             isNeutral: true,
+            ownerId: 'нет',
           ),
         );
       }
@@ -175,6 +176,7 @@ class SupabaseService {
           longitude: 0,
           boundaryPoints: [],
           isNeutral: true,
+          ownerId: 'нет',
         ),
       ];
     }
@@ -363,6 +365,34 @@ class SupabaseService {
       print('✅ Таблица violations существует');
     } catch (e) {
       print('❌ Таблица violations недоступна: ${e.toString()}');
+    }
+  }
+
+  Future<ProfileModel?> getCurrentProfile({
+    void Function(String)? debug,
+  }) async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        debug?.call('❗ currentUser == null');
+        return null;
+      }
+
+      final data = await Supabase.instance.client
+          .from('profiles')
+          .select()
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (data == null) {
+        debug?.call('❗ Профиль не найден для user.id=${user.id}');
+        return null;
+      }
+
+      return ProfileModel.fromJson(data);
+    } catch (e) {
+      debug?.call('❌ Ошибка в getCurrentProfile: $e');
+      return null;
     }
   }
 }

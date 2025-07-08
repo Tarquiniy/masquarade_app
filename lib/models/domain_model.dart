@@ -1,9 +1,11 @@
+import 'dart:convert';
+
 import 'package:latlong2/latlong.dart';
 
 class DomainModel {
   final int id;
   final String name;
-  final String? ownerId;
+  final String ownerId;
   final double latitude;
   final double longitude;
   final List<LatLng> boundaryPoints;
@@ -16,7 +18,7 @@ class DomainModel {
   DomainModel({
     required this.id,
     required this.name,
-    this.ownerId,
+    required this.ownerId,
     required this.latitude,
     required this.longitude,
     required this.boundaryPoints,
@@ -28,21 +30,23 @@ class DomainModel {
   });
 
   factory DomainModel.fromJson(Map<String, dynamic> json) {
-    final boundary = json['boundaryPoints'];
-    final List<LatLng> points = boundary is List
-        ? boundary
-              .map((p) => LatLng(p['lat'], p['lng']))
-              .toList()
-              .cast<LatLng>()
-        : [];
-
     return DomainModel(
       id: json['id'] as int,
       name: json['name'] as String,
       ownerId: json['ownerId'],
       latitude: json['latitude'] as double,
       longitude: json['longitude'] as double,
-      boundaryPoints: points,
+      boundaryPoints: (() {
+        final raw = json['boundaryPoints'];
+        if (raw is String) {
+          final list = jsonDecode(raw);
+          return List<LatLng>.from(list.map((e) => LatLng(e['lat'], e['lng'])));
+        } else if (raw is List) {
+          return List<LatLng>.from(raw.map((e) => LatLng(e['lat'], e['lng'])));
+        } else {
+          return <LatLng>[];
+        }
+      })(),
       securityLevel: json['securityLevel'] ?? 0,
       influenceLevel: json['influenceLevel'] ?? 0,
       income: json['income'] ?? 0,

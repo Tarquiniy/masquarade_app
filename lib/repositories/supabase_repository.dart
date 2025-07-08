@@ -8,6 +8,10 @@ class SupabaseRepository {
 
   SupabaseRepository(this.service);
 
+  Future<ProfileModel?> getCurrentProfile() {
+    return service.getCurrentProfile();
+  }
+
   Future<ProfileModel?> getProfileByLoginCode(
     String code,
     void Function(String msg) debug,

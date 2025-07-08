@@ -72,6 +72,7 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
           boundaryPoints: [],
           isNeutral: true,
           openViolationsCount: 0,
+          ownerId: 'нет',
         ),
       );
     }
