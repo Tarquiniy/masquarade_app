@@ -20,6 +20,16 @@ class DomainsLoaded extends DomainState {
   List<Object?> get props => [domains];
 }
 
+// Новое состояние
+class UserDomainLoaded extends DomainState {
+  final DomainModel domain;
+
+  const UserDomainLoaded(this.domain);
+
+  @override
+  List<Object?> get props => [domain];
+}
+
 class DomainError extends DomainState {
   final String message;
 

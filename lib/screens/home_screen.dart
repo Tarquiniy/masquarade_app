@@ -122,7 +122,8 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ProfileScreen(profile: widget.profile),
+        builder: (context) =>
+            ProfileScreen(profile: widget.profile), // Убрали параметр domain
       ),
     );
   }
@@ -143,11 +144,17 @@ class _HomeScreenState extends State<HomeScreen> {
     final profile = widget.profile;
     final domainState = context.watch<DomainBloc>().state;
 
+    // Проверяем, является ли пользователь владельцем домена
+    bool isDomainOwner = false;
+    if (domainState is DomainsLoaded) {
+      isDomainOwner = domainState.domains.any((d) => d.ownerId == profile.id);
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Главная'),
         actions: [
-          if (profile.isDomainOwner)
+          if (isDomainOwner) // Показываем кнопку только владельцам
             IconButton(
               icon: const Icon(Icons.location_city),
               tooltip: 'Мой домен',
@@ -304,10 +311,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => ViolationDetailScreen(
-                                violation: v,
-                                profile: widget.profile,
-                              ),
+                              builder: (_) =>
+                                  ViolationDetailScreen(violation: v),
                             ),
                           );
                         },

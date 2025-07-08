@@ -1,3 +1,4 @@
+// Полный исправленный файл:
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:masquarade_app/blocs/profile/profile_bloc.dart';
@@ -8,11 +9,7 @@ import '../../models/violation_model.dart';
 class ViolationDetailScreen extends StatelessWidget {
   final ViolationModel violation;
 
-  const ViolationDetailScreen({
-    super.key,
-    required this.violation,
-    required ProfileModel profile,
-  });
+  const ViolationDetailScreen({super.key, required this.violation});
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +20,7 @@ class ViolationDetailScreen extends StatelessWidget {
     }
 
     final profile = profileState.profile;
-    final isOwner = profile.domain == violation.domainId.toString();
+    final isOwner = profile.domainId == violation.domainId;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Детали нарушения')),
@@ -54,18 +51,11 @@ class ViolationDetailScreen extends StatelessWidget {
             if (isOwner && !violation.isClosed)
               ElevatedButton(
                 onPressed: () {
-                  // Проверка на null перед закрытием
                   if (violation.id != null) {
                     context.read<MasqueradeBloc>().add(
                       CloseViolation(violation.id!),
                     );
                     Navigator.pop(context);
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Ошибка: у нарушения нет ID'),
-                      ),
-                    );
                   }
                 },
                 child: const Text('Закрыть нарушение'),
@@ -74,18 +64,11 @@ class ViolationDetailScreen extends StatelessWidget {
             if (isOwner && !violation.isRevealed && violation.canBeRevealed)
               ElevatedButton(
                 onPressed: () {
-                  // Проверка на null перед раскрытием
                   if (violation.id != null) {
                     context.read<MasqueradeBloc>().add(
                       RevealViolator(violation.id!),
                     );
                     Navigator.pop(context);
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Ошибка: у нарушения нет ID'),
-                      ),
-                    );
                   }
                 },
                 child: const Text('Раскрыть нарушителя'),

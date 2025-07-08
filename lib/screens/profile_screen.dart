@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../blocs/auth/auth_bloc.dart';
+import 'package:masquarade_app/blocs/auth/auth_bloc.dart';
+import '../blocs/domain/domain_bloc.dart';
+import '../blocs/domain/domain_state.dart';
+import '../models/domain_model.dart';
 import '../models/profile_model.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -12,11 +15,35 @@ class ProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Профиль')),
-      body: _buildProfileContent(context, profile),
+      body: BlocBuilder<DomainBloc, DomainState>(
+        builder: (context, domainState) {
+          DomainModel? userDomain;
+
+          if (domainState is DomainsLoaded) {
+            userDomain = domainState.domains.firstWhere(
+              (d) => d.ownerId == profile.id,
+              orElse: () => DomainModel(
+                id: -1,
+                name: 'Нет домена',
+                latitude: 0,
+                longitude: 0,
+                boundaryPoints: [],
+                ownerId: '',
+              ),
+            );
+          }
+
+          return _buildProfileContent(context, profile, userDomain);
+        },
+      ),
     );
   }
 
-  Widget _buildProfileContent(BuildContext context, ProfileModel profile) {
+  Widget _buildProfileContent(
+    BuildContext context,
+    ProfileModel profile,
+    DomainModel? userDomain,
+  ) {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -59,7 +86,14 @@ class ProfileScreen extends StatelessWidget {
 
         const SizedBox(height: 12),
         _title('Домен'),
-        Text(profile.domain ?? 'нет', style: _valueStyle()),
+        Text(
+          userDomain != null && userDomain.id != -1
+              ? userDomain.name
+              : profile.domainId != null
+              ? 'Домен #${profile.domainId}'
+              : 'нет',
+          style: _valueStyle(),
+        ),
 
         const SizedBox(height: 32),
         ElevatedButton.icon(

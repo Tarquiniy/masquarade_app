@@ -8,12 +8,9 @@ import '../blocs/domain/domain_bloc.dart';
 import '../blocs/domain/domain_event.dart';
 import '../blocs/domain/domain_state.dart';
 import '../blocs/profile/profile_bloc.dart';
-import '../blocs/masquerade/masquerade_bloc.dart';
 import '../models/domain_model.dart';
 import '../models/profile_model.dart';
-import '../models/violation_model.dart';
 import '../repositories/supabase_repository.dart';
-import 'masquerade_violation_screen.dart';
 
 class DomainScreen extends StatefulWidget {
   const DomainScreen({super.key});
@@ -23,257 +20,71 @@ class DomainScreen extends StatefulWidget {
 }
 
 class _DomainScreenState extends State<DomainScreen> {
-  late final MapController _mapController;
   late final SupabaseRepository _repository;
-
+  int? _selectedPlayerId;
+  int _transferAmount = 1;
   Position? _position;
 
   @override
   void initState() {
     super.initState();
-    _mapController = MapController();
     _repository = RepositoryProvider.of<SupabaseRepository>(context);
-    _initLocation();
     context.read<DomainBloc>().add(RefreshDomains());
-    context.read<MasqueradeBloc>().add(LoadViolations());
   }
 
-  Future<void> _initLocation() async {
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      permission = await Geolocator.requestPermission();
-    }
+  // Передача домена
+  Future<void> _transferDomain(BuildContext context, int domainId) async {
+    final profiles = await _repository.getAllProfiles();
+    final currentProfile =
+        (context.read<ProfileBloc>().state as ProfileLoaded).profile;
 
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever)
-      return;
+    // Фильтруем профили, исключая текущего пользователя
+    final candidates = profiles
+        .where((p) => p.id != currentProfile.id)
+        .toList();
 
-    final pos = await Geolocator.getCurrentPosition();
-    setState(() => _position = pos);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final profileState = context.watch<ProfileBloc>().state;
-    final domainState = context.watch<DomainBloc>().state;
-    final violationState = context.watch<MasqueradeBloc>().state;
-
-    if (profileState is! ProfileLoaded || domainState is! DomainsLoaded) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
-    final profile = profileState.profile;
-
-    final domain = domainState.domains.firstWhere(
-      (d) => d.ownerId == profile.id,
-      orElse: () => DomainModel(
-        id: -1,
-        name: '',
-        latitude: 0,
-        longitude: 0,
-        boundaryPoints: [],
-        isNeutral: true,
-        openViolationsCount: 0,
-        ownerId: 'нет',
-      ),
-    );
-
-    if (domain.id == -1) {
-      return const Scaffold(body: Center(child: Text('У вас нет домена')));
-    }
-
-    final violations = violationState is ViolationsLoaded
-        ? violationState.violations
-              .where((v) => v.domainId == domain.id)
-              .toList()
-        : [];
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(domain.name),
-        backgroundColor: const Color(0xFFff2e63),
-        foregroundColor: Colors.white,
-      ),
-      body: Column(
-        children: [
-          SizedBox(
-            height: 220,
-            child: FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: LatLng(domain.latitude, domain.longitude),
-                initialZoom: 14,
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.masquerade.app',
-                ),
-                if (domain.boundaryPoints.length >= 3)
-                  PolygonLayer(
-                    polygons: [
-                      Polygon(
-                        points: domain.boundaryPoints,
-                        borderColor: const Color(0xFFff2e63),
-                        color: const Color(0xFFff2e63).withOpacity(0.3),
-                        borderStrokeWidth: 3,
-                      ),
-                    ],
-                  ),
-                if (violations.isNotEmpty)
-                  MarkerLayer(
-                    markers: violations.map((v) {
-                      final color = v.status == ViolationStatus.open
-                          ? Colors.amber
-                          : Colors.teal;
-                      return Marker(
-                        point: LatLng(v.latitude, v.longitude),
-                        width: 30,
-                        height: 30,
-                        child: Icon(Icons.location_pin, color: color, size: 30),
-                      );
-                    }).toList(),
-                  ),
-              ],
-            ),
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Передать домен'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: candidates.length,
+            itemBuilder: (context, index) {
+              final profile = candidates[index];
+              return ListTile(
+                title: Text(profile.characterName),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _confirmDomainTransfer(context, domainId, profile);
+                },
+              );
+            },
           ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: profile.isHungry && _position != null
-                        ? () {
-                            context.read<MasqueradeBloc>().add(
-                              StartHunt(
-                                isDomainOwner: true,
-                                domainId: domain.id,
-                                position: _position!,
-                              ),
-                            );
-                          }
-                        : null,
-
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFff2e63),
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Охотиться'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              MasqueradeViolationScreen(profile: profile),
-                        ),
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFff2e63),
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Нарушить Маскарад'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () =>
-                        _showTransferDomainDialog(context, domain.id),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFff2e63),
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Передать домен'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Row(
-              children: [
-                Expanded(child: Text('Защищённость ${domain.securityLevel}')),
-                Expanded(child: Text('Доходность ${domain.income}')),
-                Expanded(child: Text('Влияние ${domain.influenceLevel}')),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () =>
-                    _showTransferHungerDialog(context, profile, domain.income),
-                style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFFff2e63),
-                ),
-                child: const Text('Передать кровь'),
-              ),
-            ),
-          ),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            color: Colors.lightBlue,
-            child: const Center(
-              child: Text(
-                'НАРУШЕНИЯ МАСКАРАДА В МОЕМ ДОМЕНЕ',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-          ),
-          Expanded(
-            child: ListView.separated(
-              itemCount: violations.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final v = violations[index];
-                return ListTile(
-                  tileColor: v.status == ViolationStatus.open
-                      ? const Color(0xFFff2e63).withOpacity(0.1)
-                      : Colors.teal.withOpacity(0.1),
-                  title: Text('Нарушение маскарада №${v.id}'),
-                  subtitle: Text(
-                    v.createdAt.toLocal().toString().substring(11, 16),
-                  ),
-                );
-              },
-            ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Отмена'),
           ),
         ],
       ),
     );
   }
 
-  void _showTransferDomainDialog(BuildContext context, int domainId) async {
-    final profiles = await _repository.getAllProfiles();
-    final currentId =
-        (context.read<ProfileBloc>().state as ProfileLoaded).profile.id;
-    final candidates = profiles.where((p) => p.id != currentId).toList();
-    String? selectedId;
-
-    await showDialog(
+  void _confirmDomainTransfer(
+    BuildContext context,
+    int domainId,
+    ProfileModel newOwner,
+  ) {
+    showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Передать домен'),
-        content: DropdownButtonFormField<String>(
-          items: candidates
-              .map(
-                (p) =>
-                    DropdownMenuItem(value: p.id, child: Text(p.characterName)),
-              )
-              .toList(),
-          onChanged: (value) => selectedId = value,
+        title: const Text('Подтверждение передачи'),
+        content: Text(
+          'Вы ТОЧНО хотите передать свой домен ${newOwner.characterName}?',
         ),
         actions: [
           TextButton(
@@ -282,15 +93,160 @@ class _DomainScreenState extends State<DomainScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
-              if (selectedId == null) return;
+              Navigator.pop(ctx);
               await _repository.transferDomain(
                 domainId.toString(),
-                selectedId!,
+                newOwner.id,
               );
               if (mounted) {
                 context.read<DomainBloc>().add(RefreshDomains());
-                Navigator.pop(ctx);
+                // Обновляем профиль текущего пользователя
+                final profileState =
+                    context.read<ProfileBloc>().state as ProfileLoaded;
+                context.read<ProfileBloc>().add(
+                  SetProfile(profileState.profile.copyWith(domainId: null)),
+                );
               }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Передать'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Передача пунктов голода
+  void _showTransferHungerDialog(BuildContext context, int maxAmount) {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Передача пунктов голода'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Выберите количество:'),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.remove),
+                      onPressed: _transferAmount > 1
+                          ? () => setState(() => _transferAmount--)
+                          : null,
+                    ),
+                    Text('$_transferAmount'),
+                    IconButton(
+                      icon: const Icon(Icons.add),
+                      onPressed: _transferAmount < maxAmount
+                          ? () => setState(() => _transferAmount++)
+                          : null,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text('Выберите получателя:'),
+                FutureBuilder<List<ProfileModel>>(
+                  future: _repository.getAllProfiles(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const CircularProgressIndicator();
+                    }
+
+                    final profiles = snapshot.data!;
+                    final currentProfile =
+                        (context.read<ProfileBloc>().state as ProfileLoaded)
+                            .profile;
+                    final candidates = profiles
+                        .where((p) => p.id != currentProfile.id)
+                        .toList();
+
+                    return DropdownButton<int>(
+                      value: _selectedPlayerId,
+                      hint: const Text('Выберите игрока'),
+                      items: candidates.map((profile) {
+                        return DropdownMenuItem<int>(
+                          value: int.tryParse(profile.id),
+                          child: Text(profile.characterName),
+                        );
+                      }).toList(),
+                      onChanged: (value) =>
+                          setState(() => _selectedPlayerId = value),
+                    );
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Отмена'),
+              ),
+              ElevatedButton(
+                onPressed: _selectedPlayerId == null
+                    ? null
+                    : () {
+                        Navigator.pop(ctx);
+                        _confirmHungerTransfer(
+                          context,
+                          _transferAmount,
+                          _selectedPlayerId!,
+                        );
+                      },
+                child: const Text('Продолжить'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _confirmHungerTransfer(
+    BuildContext context,
+    int amount,
+    int recipientId,
+  ) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Подтверждение передачи'),
+        content: FutureBuilder<ProfileModel?>(
+          future: _repository.getProfileById(recipientId.toString()),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const CircularProgressIndicator();
+            }
+            return Text(
+              'Вы хотите передать $amount пунктов голода игроку ${snapshot.data!.characterName}?',
+            );
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Отмена'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final currentProfile =
+                  (context.read<ProfileBloc>().state as ProfileLoaded).profile;
+              await _repository.transferHunger(
+                fromUserId: currentProfile.id,
+                toUserId: recipientId.toString(),
+                amount: amount,
+              );
+              // Обновляем профиль
+              context.read<ProfileBloc>().add(
+                SetProfile(
+                  currentProfile.copyWith(
+                    hunger: currentProfile.hunger - amount,
+                  ),
+                ),
+              );
             },
             child: const Text('Передать'),
           ),
@@ -299,75 +255,157 @@ class _DomainScreenState extends State<DomainScreen> {
     );
   }
 
-  void _showTransferHungerDialog(
-    BuildContext context,
-    ProfileModel profile,
-    int maxAmount,
-  ) async {
-    final profiles = await _repository.getAllProfiles();
-    final candidates = profiles.where((p) => p.id != profile.id).toList();
+  @override
+  Widget build(BuildContext context) {
+    final domainState = context.watch<DomainBloc>().state;
+    final profileState = context.watch<ProfileBloc>().state;
 
-    int amount = 1;
-    String? selectedId;
+    if (profileState is! ProfileLoaded || domainState is! DomainsLoaded) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          title: const Text('Передача крови'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  IconButton(
-                    onPressed: amount > 1
-                        ? () => setState(() => amount--)
-                        : null,
-                    icon: const Icon(Icons.remove),
-                  ),
-                  Text('$amount'),
-                  IconButton(
-                    onPressed: amount < maxAmount
-                        ? () => setState(() => amount++)
-                        : null,
-                    icon: const Icon(Icons.add),
-                  ),
-                ],
-              ),
-              DropdownButtonFormField<String>(
-                decoration: const InputDecoration(labelText: 'Получатель'),
-                items: candidates
-                    .map(
-                      (p) => DropdownMenuItem(
-                        value: p.id,
-                        child: Text(p.characterName),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (val) => selectedId = val,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Отмена'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (selectedId == null) return;
-                await _repository.transferHunger(
-                  fromUserId: profile.id,
-                  toUserId: selectedId!,
-                  amount: amount,
-                );
-                if (context.mounted) Navigator.pop(ctx);
-              },
-              child: const Text('Передать'),
-            ),
-          ],
+    final profile = profileState.profile;
+    final domain = domainState.domains.firstWhere(
+      (d) => d.ownerId == profile.id,
+      orElse: () => DomainModel(
+        id: -1,
+        name: 'Домен не найден',
+        latitude: 0,
+        longitude: 0,
+        boundaryPoints: [],
+        ownerId: '',
+      ),
+    );
+
+    if (domain.id == -1) {
+      return const Scaffold(
+        body: Center(
+          child: Text('У вас нет домена или произошла ошибка загрузки'),
         ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(domain.name),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.swap_horiz),
+            onPressed: () => _transferDomain(context, domain.id),
+            tooltip: 'Передать домен',
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          SizedBox(
+            height: 300,
+            child: FlutterMap(
+              options: MapOptions(
+                initialCenter: _position != null
+                    ? LatLng(_position!.latitude, _position!.longitude)
+                    : const LatLng(55.751244, 37.618423),
+                initialZoom: 13,
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                ),
+                PolygonLayer(
+                  polygons: [
+                    Polygon(
+                      points: domain.boundaryPoints,
+                      color: Colors.blue.withOpacity(0.3),
+                      borderColor: Colors.blue,
+                      borderStrokeWidth: 2,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Статистика домена',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    const Text('Защищенность: '),
+                    Text('${domain.securityLevel}'),
+                    const SizedBox(width: 20),
+                    IconButton(
+                      icon: const Icon(Icons.info_outline),
+                      onPressed: () => showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Защищенность'),
+                          content: const Text(
+                            'Если за одну ночь в домене совершено нарушений '
+                            'Маскарада больше или равно уровню Защищенности, '
+                            'домен становится Нейтральным',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const Text('OK'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Text('Влиятельность: '),
+                    Text('${domain.influenceLevel}'),
+                    const SizedBox(width: 20),
+                    IconButton(
+                      icon: const Icon(Icons.info_outline),
+                      onPressed: () => showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Влиятельность'),
+                          content: const Text(
+                            'Складывается из статусов и влияния домена. '
+                            'Восстанавливается до базового уровня перед стартом игровой ночи',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const Text('OK'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Text('Доходность: '),
+                    Text('${domain.income}'),
+                    const SizedBox(width: 20),
+                    IconButton(
+                      icon: const Icon(Icons.arrow_forward),
+                      onPressed: () =>
+                          _showTransferHungerDialog(context, domain.income),
+                      tooltip: 'Передать пункты голода',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -22,8 +22,6 @@ void main() async {
   await Supabase.initialize(url: supabase_url, anonKey: supabase_anonKey);
 
   final service = SupabaseService(Supabase.instance.client);
-  // Убрали вызов checkViolationsTable, так как он должен быть в SupabaseService
-
   final repository = SupabaseRepository(service);
   runApp(MyApp(repository: repository));
 }
@@ -74,7 +72,7 @@ class AppEntry extends StatelessWidget {
             create: (_) =>
                 MasqueradeBloc(repository: repository, currentProfile: profile)
                   ..add(LoadViolations()),
-            child: HomeScreen(profile: profile),
+            child: HomeScreen(profile: profile), // Исправлено
           );
         }
 

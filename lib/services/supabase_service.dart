@@ -64,7 +64,7 @@ class SupabaseService {
       bloodPower: profileRow['blood_power'],
       hunger: 0,
       influence: 0,
-      domain: null,
+      domainId: null,
       role: 'player',
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
@@ -107,7 +107,7 @@ class SupabaseService {
       final predefinedProfile = ProfileModel.fromJson(profileData);
       final newProfile = predefinedProfile.copyWith(
         hunger: 5,
-        telegramUsername: clean,
+        external_name: clean,
       );
 
       // Логируем создание профиля
@@ -183,10 +183,26 @@ class SupabaseService {
   }
 
   Future<void> transferDomain(String domainId, String newOwnerId) async {
+    // Обновляем профиль нового владельца
     await client
+        .from('profiles')
+        .update({'domain_id': int.parse(domainId)})
+        .eq('id', newOwnerId);
+
+    // Обновляем профиль старого владельца
+    final oldOwner = await client
         .from('domains')
-        .update({'owner_id': newOwnerId})
-        .eq('id', domainId);
+        .select('owner_id')
+        .eq('id', domainId)
+        .single()
+        .then((data) => data['owner_id'] as String?);
+
+    if (oldOwner != null) {
+      await client
+          .from('profiles')
+          .update({'domain_id': null})
+          .eq('id', oldOwner);
+    }
   }
 
   Future<String?> reportViolation(ViolationModel violation) async {

@@ -38,8 +38,8 @@ class SupabaseRepository {
     return service.getDomains();
   }
 
-  Future<void> transferDomain(String domainId, String newOwnerId) {
-    return service.transferDomain(domainId, newOwnerId);
+  Future<void> transferDomain(String domainId, String newOwnerId) async {
+    await service.transferDomain(domainId, newOwnerId);
   }
 
   Future<String?> reportViolation(ViolationModel violation) {

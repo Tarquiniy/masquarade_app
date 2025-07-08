@@ -8,7 +8,7 @@ class ProfileModel {
   final int bloodPower;
   final int hunger;
   final int influence;
-  final String? domain;
+  final int? domainId; // Изменено на ID домена
   final String role;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -24,7 +24,7 @@ class ProfileModel {
     required this.bloodPower,
     required this.hunger,
     required this.influence,
-    required this.domain,
+    required this.domainId, // Обновлено
     required this.role,
     required this.createdAt,
     required this.updatedAt,
@@ -42,7 +42,9 @@ class ProfileModel {
       bloodPower: json['blood_power'] ?? 0,
       hunger: json['hunger'] ?? 0,
       influence: json['influence'] ?? 0,
-      domain: json['domain'],
+      domainId: json['domain_id'] != null
+          ? int.tryParse(json['domain_id'].toString())
+          : null,
       role: json['role'] ?? 'user',
       createdAt: DateTime.parse(
         json['created_at'] ?? DateTime.now().toIso8601String(),
@@ -65,7 +67,7 @@ class ProfileModel {
       'blood_power': bloodPower,
       'hunger': hunger,
       'influence': influence,
-      'domain': domain,
+      'domain_id': domainId, // Обновлено
       'role': role,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
@@ -73,7 +75,7 @@ class ProfileModel {
     };
   }
 
-  bool get isDomainOwner => domain != null && domain!.isNotEmpty;
+  bool get isDomainOwner => domainId != null;
   bool get isAdmin => role == 'admin';
   bool get isStoryteller => role == 'storyteller';
   bool get isHungry => hunger > 0;
@@ -88,11 +90,11 @@ class ProfileModel {
     int? bloodPower,
     int? hunger,
     int? influence,
-    String? domain,
+    int? domainId,
     String? role,
     DateTime? createdAt,
     DateTime? updatedAt,
-    String? telegramUsername,
+    String? external_name,
   }) {
     return ProfileModel(
       id: id ?? this.id,
@@ -100,11 +102,11 @@ class ProfileModel {
       sect: sect ?? this.sect,
       clan: clan ?? this.clan,
       status: status ?? this.status,
-      disciplines: disciplines ?? this.disciplines,
+      disciplines: disciplines ?? List.from(this.disciplines),
       bloodPower: bloodPower ?? this.bloodPower,
       hunger: hunger ?? this.hunger,
       influence: influence ?? this.influence,
-      domain: domain ?? this.domain,
+      domainId: domainId ?? this.domainId,
       role: role ?? this.role,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

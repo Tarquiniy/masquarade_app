@@ -9,3 +9,13 @@ abstract class DomainEvent extends Equatable {
 class LoadDomains extends DomainEvent {}
 
 class RefreshDomains extends DomainEvent {}
+
+// Новое событие
+class LoadUserDomain extends DomainEvent {
+  final String userId;
+
+  const LoadUserDomain(this.userId);
+
+  @override
+  List<Object?> get props => [userId];
+}

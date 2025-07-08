@@ -1,4 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:masquarade_app/models/domain_model.dart';
 import 'package:masquarade_app/utils/debug_telegram.dart';
 import 'domain_event.dart';
 import 'domain_state.dart';
@@ -10,6 +11,7 @@ class DomainBloc extends Bloc<DomainEvent, DomainState> {
   DomainBloc({required this.repository}) : super(DomainInitial()) {
     on<LoadDomains>(_onLoadDomains);
     on<RefreshDomains>(_onRefreshDomains);
+    on<LoadUserDomain>(_onLoadUserDomain);
   }
 
   Future<void> _onLoadDomains(
@@ -60,6 +62,31 @@ class DomainBloc extends Bloc<DomainEvent, DomainState> {
     } catch (e) {
       await sendDebugToTelegram('❌ Ошибка в RefreshDomains: $e');
       emit(DomainError('Не удалось обновить домены'));
+    }
+  }
+
+  Future<void> _onLoadUserDomain(
+    LoadUserDomain event,
+    Emitter<DomainState> emit,
+  ) async {
+    try {
+      final domains = await repository.getDomains();
+      final userDomain = domains.firstWhere(
+        (d) => d.ownerId == event.userId,
+        orElse: () => DomainModel(
+          id: -1,
+          name: 'No domain',
+          latitude: 0,
+          longitude: 0,
+          boundaryPoints: [],
+          ownerId: '',
+        ),
+      );
+
+      emit(UserDomainLoaded(userDomain));
+    } catch (e) {
+      await sendDebugToTelegram('❌ Ошибка загрузки домена пользователя: $e');
+      emit(DomainError('Не удалось загрузить домен'));
     }
   }
 }
