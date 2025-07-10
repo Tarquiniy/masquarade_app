@@ -137,7 +137,12 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
     context.read<DomainBloc>().add(RefreshDomains(widget.profile));
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const DomainScreen()),
+      MaterialPageRoute(
+        builder: (_) => BlocProvider.value(
+          value: context.read<MasqueradeBloc>(),
+          child: const DomainScreen(),
+        ),
+      ),
     );
   }
 

@@ -2,14 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:masquarade_app/blocs/domain/domain_event.dart';
 
+import 'package:masquarade_app/blocs/domain/domain_event.dart';
 import '../blocs/domain/domain_bloc.dart';
 import '../blocs/domain/domain_state.dart';
 import '../blocs/profile/profile_bloc.dart';
 import '../models/domain_model.dart';
 import '../models/profile_model.dart';
 import '../blocs/masquerade/masquerade_bloc.dart';
+import '../models/violation_model.dart';
 
 class DomainScreen extends StatelessWidget {
   const DomainScreen({super.key});
@@ -18,6 +19,9 @@ class DomainScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final profileState = context.watch<ProfileBloc>().state;
     final domainState = context.watch<DomainBloc>().state;
+
+    // ВАЖНО: добавляем эту строчку
+    context.read<MasqueradeBloc>().add(LoadViolations());
 
     if (profileState is! ProfileLoaded) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -50,9 +54,7 @@ class DomainScreen extends StatelessWidget {
       ),
     );
 
-    final hasDomain = userDomain.id != -1;
-
-    if (!hasDomain) {
+    if (userDomain.id == -1) {
       return const Center(child: Text('У вас нет домена.'));
     }
 
@@ -129,19 +131,20 @@ class DomainScreen extends StatelessWidget {
             if (state is ViolationsLoading) {
               return const Center(child: CircularProgressIndicator());
             } else if (state is ViolationsLoaded) {
-              final violations = state.violations
+              final violationsInDomain = state.violations
                   .where((v) => v.domainId == userDomain.id)
                   .toList();
 
-              if (violations.isEmpty) {
-                return const Text('На территории домена нарушений нет');
+              if (violationsInDomain.isEmpty) {
+                return const Text('Нарушений на территории домена нет');
               }
+
               return ListView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                itemCount: violations.length,
+                itemCount: violationsInDomain.length,
                 itemBuilder: (_, idx) {
-                  final v = violations[idx];
+                  final v = violationsInDomain[idx];
                   return ListTile(
                     title: Text(v.description),
                     subtitle: Text(v.status.name),
@@ -159,7 +162,6 @@ class DomainScreen extends StatelessWidget {
 
   void _transferDomain(BuildContext context, int domainId) async {
     final players = await context.read<ProfileBloc>().getPlayers();
-
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -224,7 +226,6 @@ class DomainScreen extends StatelessWidget {
 
   void _showHungerTransferDialog(BuildContext context, int maxHunger) {
     int hungerToTransfer = 1;
-
     showDialog(
       context: context,
       builder: (_) => StatefulBuilder(
@@ -271,7 +272,6 @@ class DomainScreen extends StatelessWidget {
     int hungerToTransfer,
   ) async {
     final players = await context.read<ProfileBloc>().getPlayers();
-
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
