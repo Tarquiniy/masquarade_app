@@ -2,14 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-
 import 'package:masquarade_app/blocs/domain/domain_event.dart';
+
 import '../blocs/domain/domain_bloc.dart';
 import '../blocs/domain/domain_state.dart';
 import '../blocs/profile/profile_bloc.dart';
+import '../blocs/masquerade/masquerade_bloc.dart';
+
 import '../models/domain_model.dart';
 import '../models/profile_model.dart';
-import '../blocs/masquerade/masquerade_bloc.dart';
 import '../models/violation_model.dart';
 
 class DomainScreen extends StatelessWidget {
@@ -20,10 +21,9 @@ class DomainScreen extends StatelessWidget {
     final profileState = context.watch<ProfileBloc>().state;
     final domainState = context.watch<DomainBloc>().state;
 
-    // ВАЖНО: добавляем эту строчку
     context.read<MasqueradeBloc>().add(LoadViolations());
 
-    if (profileState is! ProfileLoaded) {
+    if (profileState is! ProfileLoaded || domainState is! DomainsLoaded) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
@@ -31,9 +31,7 @@ class DomainScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Мой домен')),
-      body: domainState is DomainsLoaded
-          ? _buildDomainContent(context, profile, domainState.domains)
-          : const Center(child: CircularProgressIndicator()),
+      body: _buildDomainContent(context, profile, domainState.domains),
     );
   }
 
@@ -62,55 +60,72 @@ class DomainScreen extends StatelessWidget {
         ? userDomain.boundaryPoints.first
         : const LatLng(55.751244, 37.618423);
 
-    return ListView(
-      padding: const EdgeInsets.all(8),
+    return Column(
       children: [
         SizedBox(
           height: MediaQuery.of(context).size.height * 0.4,
-          child: FlutterMap(
-            options: MapOptions(initialCenter: center, initialZoom: 13),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              ),
-              if (userDomain.boundaryPoints.isNotEmpty)
-                PolygonLayer(
-                  polygons: [
-                    Polygon(
-                      points: userDomain.boundaryPoints,
-                      color: Colors.blue.withOpacity(0.3),
-                      borderColor: Colors.blue,
-                      borderStrokeWidth: 2,
+          child: BlocBuilder<MasqueradeBloc, MasqueradeState>(
+            builder: (context, state) {
+              final violations = (state is ViolationsLoaded)
+                  ? state.violations
+                        .where((v) => v.domainId == userDomain.id)
+                        .toList()
+                  : <ViolationModel>[];
+
+              return FlutterMap(
+                options: MapOptions(initialCenter: center, initialZoom: 13),
+                children: [
+                  TileLayer(
+                    urlTemplate:
+                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  ),
+                  if (userDomain.boundaryPoints.isNotEmpty)
+                    PolygonLayer(
+                      polygons: [
+                        Polygon(
+                          points: userDomain.boundaryPoints,
+                          color: Colors.blue.withOpacity(0.3),
+                          borderColor: Colors.blue,
+                          borderStrokeWidth: 2,
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-            ],
+                  MarkerLayer(
+                    markers: violations
+                        .map(
+                          (v) => Marker(
+                            point: LatLng(v.latitude, v.longitude),
+                            width: 40,
+                            height: 40,
+                            child: GestureDetector(
+                              onTap: () => _onViolationTap(context, v),
+                              child: const Icon(
+                                Icons.warning,
+                                color: Colors.red,
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
+              );
+            },
           ),
         ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Ваш домен: ${userDomain.name}',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () => _transferDomain(context, userDomain.id),
-              child: const Text('Передать домен'),
-            ),
-          ],
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Text(
+            'Ваш домен: ${userDomain.name}',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
         ),
         const Divider(),
         Text('Защищенность: ${userDomain.securityLevel}'),
-        Text('Влиятельность: ${userDomain.influenceLevel}'),
+        Text('Влияние: ${userDomain.influenceLevel}'),
         Row(
           children: [
-            Expanded(child: Text('Доходность: ${userDomain.income}')),
+            Expanded(child: Text('Доход: ${userDomain.income}')),
             ElevatedButton(
               onPressed: () =>
                   _showHungerTransferDialog(context, userDomain.income),
@@ -118,45 +133,118 @@ class DomainScreen extends StatelessWidget {
             ),
           ],
         ),
+        ElevatedButton(
+          onPressed: () => _transferDomain(context, userDomain.id),
+          child: const Text('Передать домен'),
+        ),
         const Divider(),
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 4.0),
-          child: Text(
-            'Нарушения маскарада',
-            style: TextStyle(fontWeight: FontWeight.bold),
+        const Text(
+          'Нарушения маскарада',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        Expanded(
+          child: BlocBuilder<MasqueradeBloc, MasqueradeState>(
+            builder: (context, state) {
+              if (state is ViolationsLoading) {
+                return const Center(child: CircularProgressIndicator());
+              } else if (state is ViolationsLoaded) {
+                final violationsInDomain = state.violations
+                    .where((v) => v.domainId == userDomain.id)
+                    .toList();
+
+                if (violationsInDomain.isEmpty) {
+                  return const Center(
+                    child: Text('Нарушений на территории домена нет'),
+                  );
+                }
+
+                return ListView.builder(
+                  itemCount: violationsInDomain.length,
+                  itemBuilder: (_, idx) {
+                    final v = violationsInDomain[idx];
+                    return ListTile(
+                      tileColor: _tileColor(v, profile),
+                      title: Text(v.description),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Статус: ${v.status.name}'),
+                          if (v.closedAt != null)
+                            Text('Закрыто: ${v.closedAt}'),
+                          if (v.violatorName != null)
+                            Text('Нарушитель: ${v.violatorName}'),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              } else {
+                return const SizedBox.shrink();
+              }
+            },
           ),
         ),
-        BlocBuilder<MasqueradeBloc, MasqueradeState>(
-          builder: (context, state) {
-            if (state is ViolationsLoading) {
-              return const Center(child: CircularProgressIndicator());
-            } else if (state is ViolationsLoaded) {
-              final violationsInDomain = state.violations
-                  .where((v) => v.domainId == userDomain.id)
-                  .toList();
+      ],
+    );
+  }
 
-              if (violationsInDomain.isEmpty) {
-                return const Text('Нарушений на территории домена нет');
+  void _onViolationTap(BuildContext context, ViolationModel v) {
+    final profile =
+        (context.read<ProfileBloc>().state as ProfileLoaded).profile;
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Нарушение Маскарада'),
+        content: Text(v.description),
+        actions: [
+          TextButton(
+            onPressed: () {
+              if (profile.influence < v.costToClose) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Влияния недостаточно для закрытия'),
+                  ),
+                );
+                Navigator.pop(context);
+                return;
               }
 
-              return ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: violationsInDomain.length,
-                itemBuilder: (_, idx) {
-                  final v = violationsInDomain[idx];
-                  return ListTile(
-                    title: Text(v.description),
-                    subtitle: Text(v.status.name),
-                  );
-                },
+              context.read<MasqueradeBloc>().add(
+                CloseViolation(violationId: v.id),
               );
-            } else {
-              return const SizedBox.shrink();
-            }
-          },
-        ),
-      ],
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Вы закрыли нарушение Маскарада')),
+              );
+            },
+            child: Text('Восстановить Маскарад (${v.costToClose})'),
+          ),
+          if (_isWithin24h(v))
+            TextButton(
+              onPressed: () {
+                if (profile.influence < v.costToReveal) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Недостаточно связей, чтобы узнать'),
+                    ),
+                  );
+                  Navigator.pop(context);
+                  return;
+                }
+
+                context.read<MasqueradeBloc>().add(
+                  RevealViolator(violationId: v.id),
+                );
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Вы узнали нарушителя')),
+                );
+              },
+              child: Text('Узнать нарушителя (${v.costToReveal})'),
+            ),
+        ],
+      ),
     );
   }
 
@@ -331,4 +419,16 @@ class DomainScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+bool _isWithin24h(ViolationModel v) {
+  final now = DateTime.now();
+  return now.difference(v.createdAt).inHours <= 24;
+}
+
+Color _tileColor(ViolationModel v, ProfileModel profile) {
+  if (v.isClosed && v.violatorName != null) return Colors.green.shade100;
+  if (v.isClosed || v.violatorName != null) return Colors.yellow.shade100;
+  if (v.violatorId == profile.id) return Colors.blue.shade100;
+  return Colors.red.shade100;
 }

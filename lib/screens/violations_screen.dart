@@ -58,7 +58,7 @@ class ViolationsScreen extends StatelessWidget {
                           // Проверка на null перед раскрытием
                           if (violation.id != null) {
                             context.read<MasqueradeBloc>().add(
-                              RevealViolator(violation.id!),
+                              RevealViolator(violationId: violation.id),
                             );
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -75,7 +75,7 @@ class ViolationsScreen extends StatelessWidget {
                           // Проверка на null перед закрытием
                           if (violation.id != null) {
                             context.read<MasqueradeBloc>().add(
-                              CloseViolation(violation.id!),
+                              CloseViolation(violationId: violation.id),
                             );
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(

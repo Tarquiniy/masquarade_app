@@ -6,10 +6,11 @@ class ViolationModel {
   final String id;
   final String violatorId;
   final String? violatorName;
-  final int domainId; // ✅ теперь int
+  final int domainId;
   final String description;
   final int hungerSpent;
   final int costToClose;
+  final int costToReveal; // ✅ добавлено
   final ViolationStatus status;
   final bool violatorKnown;
   final DateTime createdAt;
@@ -27,6 +28,7 @@ class ViolationModel {
     required this.description,
     required this.hungerSpent,
     required this.costToClose,
+    required this.costToReveal, // ✅ добавлено
     required this.status,
     required this.violatorKnown,
     required this.createdAt,
@@ -47,6 +49,7 @@ class ViolationModel {
         description: json['description'] as String,
         hungerSpent: json['hunger_spent'] ?? 0,
         costToClose: json['cost_to_close'] ?? 0,
+        costToReveal: json['cost_to_reveal'] ?? 0, // ✅ добавлено
         status: _statusFromString(json['status']),
         violatorKnown: json['violator_known'] ?? false,
         createdAt: DateTime.parse(json['created_at']),
@@ -74,6 +77,7 @@ class ViolationModel {
       'description': description,
       'hunger_spent': hungerSpent,
       'cost_to_close': costToClose,
+      'cost_to_reveal': costToReveal, // ✅ добавлено
       'status': _statusToString(status),
       'violator_known': violatorKnown,
       'created_at': createdAt.toIso8601String(),
@@ -83,6 +87,44 @@ class ViolationModel {
       'longitude': longitude,
       'resolved_by': resolvedBy,
     };
+  }
+
+  ViolationModel copyWith({
+    String? id,
+    String? violatorId,
+    String? violatorName,
+    int? domainId,
+    String? description,
+    int? hungerSpent,
+    int? costToClose,
+    int? costToReveal,
+    ViolationStatus? status,
+    bool? violatorKnown,
+    DateTime? createdAt,
+    DateTime? closedAt,
+    DateTime? revealedAt,
+    double? latitude,
+    double? longitude,
+    String? resolvedBy,
+  }) {
+    return ViolationModel(
+      id: id ?? this.id,
+      violatorId: violatorId ?? this.violatorId,
+      violatorName: violatorName ?? this.violatorName,
+      domainId: domainId ?? this.domainId,
+      description: description ?? this.description,
+      hungerSpent: hungerSpent ?? this.hungerSpent,
+      costToClose: costToClose ?? this.costToClose,
+      costToReveal: costToReveal ?? this.costToReveal,
+      status: status ?? this.status,
+      violatorKnown: violatorKnown ?? this.violatorKnown,
+      createdAt: createdAt ?? this.createdAt,
+      closedAt: closedAt ?? this.closedAt,
+      revealedAt: revealedAt ?? this.revealedAt,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      resolvedBy: resolvedBy ?? this.resolvedBy,
+    );
   }
 
   static ViolationStatus _statusFromString(String value) {

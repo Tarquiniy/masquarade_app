@@ -14,7 +14,7 @@ class ReportViolation extends MasqueradeEvent {
   final int hungerSpent;
   final double latitude;
   final double longitude;
-  final int domainId; // ← исправлено
+  final int domainId;
 
   const ReportViolation({
     required this.description,
@@ -37,7 +37,7 @@ class ReportViolation extends MasqueradeEvent {
 class StartHunt extends MasqueradeEvent {
   final bool isDomainOwner;
   final Position position;
-  final int domainId; // ← исправлено
+  final int domainId;
 
   const StartHunt({
     required this.isDomainOwner,
@@ -52,7 +52,7 @@ class StartHunt extends MasqueradeEvent {
 class CloseViolation extends MasqueradeEvent {
   final String violationId;
 
-  const CloseViolation(this.violationId);
+  const CloseViolation({required this.violationId});
 
   @override
   List<Object?> get props => [violationId];
@@ -61,7 +61,7 @@ class CloseViolation extends MasqueradeEvent {
 class RevealViolator extends MasqueradeEvent {
   final String violationId;
 
-  const RevealViolator(this.violationId);
+  const RevealViolator({required this.violationId});
 
   @override
   List<Object?> get props => [violationId];

@@ -51,7 +51,7 @@ class ViolationDetailScreen extends StatelessWidget {
                 onPressed: () {
                   if (violation.id != null) {
                     context.read<MasqueradeBloc>().add(
-                      CloseViolation(violation.id!),
+                      CloseViolation(violationId: violation.id),
                     );
                     Navigator.pop(context);
                   }
@@ -64,7 +64,7 @@ class ViolationDetailScreen extends StatelessWidget {
                 onPressed: () {
                   if (violation.id != null) {
                     context.read<MasqueradeBloc>().add(
-                      RevealViolator(violation.id!),
+                      RevealViolator(violationId: violation.id),
                     );
                     Navigator.pop(context);
                   }

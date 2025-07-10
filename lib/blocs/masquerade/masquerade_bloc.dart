@@ -246,6 +246,7 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
       description: description,
       hungerSpent: hungerSpent,
       costToClose: hungerSpent * 2,
+      costToReveal: hungerSpent,
       status: ViolationStatus.open,
       violatorKnown: false,
       createdAt: DateTime.now(),
