@@ -30,28 +30,45 @@ class DomainModel {
   });
 
   factory DomainModel.fromJson(Map<String, dynamic> json) {
-    return DomainModel(
-      id: json['id'] as int,
-      name: json['name'] as String,
-      ownerId: json['ownerId'],
-      latitude: json['latitude'] as double,
-      longitude: json['longitude'] as double,
-      boundaryPoints: (() {
-        final raw = json['boundaryPoints'];
+    List<LatLng> parseBoundaryPoints(dynamic raw) {
+      try {
         if (raw is String) {
-          final list = jsonDecode(raw);
-          return List<LatLng>.from(list.map((e) => LatLng(e['lat'], e['lng'])));
+          final list = jsonDecode(raw) as List;
+          return list.map((e) {
+            return LatLng(
+              double.parse(e['lat'].toString()),
+              double.parse(e['lng'].toString()),
+            );
+          }).toList();
         } else if (raw is List) {
-          return List<LatLng>.from(raw.map((e) => LatLng(e['lat'], e['lng'])));
-        } else {
-          return <LatLng>[];
+          return raw.map((e) {
+            return LatLng(
+              double.parse(e['lat'].toString()),
+              double.parse(e['lng'].toString()),
+            );
+          }).toList();
         }
-      })(),
-      securityLevel: json['securityLevel'] ?? 0,
-      influenceLevel: json['influenceLevel'] ?? 0,
-      income: json['income'] ?? 0,
-      isNeutral: json['isNeutral'] ?? false,
-      openViolationsCount: json['open_violations_count'] ?? 0,
+      } catch (e) {
+        print('Error parsing boundary points: $e');
+      }
+      return [];
+    }
+
+    return DomainModel(
+      id: json['id'] is int
+          ? json['id']
+          : int.tryParse(json['id'].toString()) ?? -1,
+      name: json['name'] as String? ?? 'Без названия',
+      ownerId: json['ownerId']?.toString() ?? '',
+      latitude: (json['latitude'] as num?)?.toDouble() ?? 0.0,
+      longitude: (json['longitude'] as num?)?.toDouble() ?? 0.0,
+      boundaryPoints: parseBoundaryPoints(json['boundaryPoints']),
+      securityLevel: (json['securityLevel'] as num?)?.toInt() ?? 0,
+      influenceLevel: (json['influenceLevel'] as num?)?.toInt() ?? 0,
+      income: (json['income'] as num?)?.toInt() ?? 0,
+      isNeutral: json['isNeutral'] as bool? ?? false,
+      openViolationsCount:
+          (json['open_violations_count'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -75,10 +92,10 @@ class DomainModel {
 
   bool isPointInside(double lat, double lng) {
     try {
-      // Нейтральная территория везде
       if (isNeutral) return true;
 
-      // Упрощенная проверка для обычных доменов
+      if (boundaryPoints.isEmpty) return false;
+
       final distance = Distance();
       final center = LatLng(latitude, longitude);
       final point = LatLng(lat, lng);

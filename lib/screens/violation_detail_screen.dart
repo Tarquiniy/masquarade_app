@@ -1,8 +1,6 @@
-// Полный исправленный файл:
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:masquarade_app/blocs/profile/profile_bloc.dart';
-import 'package:masquarade_app/models/profile_model.dart';
 import '../../blocs/masquerade/masquerade_bloc.dart';
 import '../../models/violation_model.dart';
 

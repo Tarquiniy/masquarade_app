@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../models/profile_model.dart';
 import '../models/violation_model.dart';
 import '../models/domain_model.dart';
@@ -5,11 +9,34 @@ import '../services/supabase_service.dart';
 
 class SupabaseRepository {
   final SupabaseService service;
+  final SupabaseClient client;
+  final _profileController = StreamController<ProfileModel?>.broadcast();
 
-  SupabaseRepository(this.service);
+  SupabaseRepository(this.service) : client = service.client;
+  Stream<ProfileModel?> get profileStream => _profileController.stream;
 
-  Future<ProfileModel?> getCurrentProfile() {
-    return service.getCurrentProfile();
+  Future<ProfileModel?> getCurrentProfile() async {
+    try {
+      final user = client.auth.currentUser;
+      if (user == null) {
+        print('❗️ No authenticated user');
+        return null;
+      }
+
+      print('🔍 Loading current profile for user: ${user.id}');
+      final profile = await getProfileById(user.id);
+
+      if (profile == null) {
+        print('❌ Profile not found for user: ${user.id}');
+      } else {
+        print('✅ Current profile loaded: ${profile.characterName}');
+      }
+
+      return profile;
+    } catch (e) {
+      print('❌ Error getting current profile: $e');
+      return null;
+    }
   }
 
   Future<ProfileModel?> getProfileByLoginCode(
@@ -111,7 +138,18 @@ class SupabaseRepository {
     return service.updateInfluence(profileId, influence);
   }
 
-  Future<ProfileModel?> getProfileById(String id) {
-    return service.getProfileById(id);
+  Future<ProfileModel?> getProfileById(String id) async {
+    try {
+      final profile = await service.getProfileById(id);
+      _profileController.add(profile);
+      return profile;
+    } catch (e) {
+      _profileController.add(null);
+      return null;
+    }
+  }
+
+  void dispose() {
+    _profileController.close();
   }
 }

@@ -361,12 +361,26 @@ class SupabaseService {
   }
 
   Future<ProfileModel?> getProfileById(String id) async {
-    final data = await client
-        .from('profiles')
-        .select()
-        .eq('id', id)
-        .maybeSingle();
-    return data == null ? null : ProfileModel.fromJson(data);
+    try {
+      print('🔍 Getting profile by ID: $id');
+      final data = await client
+          .from('profiles')
+          .select()
+          .eq('id', id)
+          .maybeSingle();
+
+      if (data == null) {
+        print('❌ Profile not found for ID: $id');
+        return null;
+      }
+
+      final profile = ProfileModel.fromJson(data);
+      print('✅ Profile loaded: ${profile.characterName}');
+      return profile;
+    } catch (e) {
+      print('❌ Error getting profile by ID: $e');
+      return null;
+    }
   }
 
   Future<List<ProfileModel>> getAllProfiles() async {

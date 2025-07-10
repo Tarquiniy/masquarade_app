@@ -3,10 +3,11 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:masquarade_app/blocs/profile/profile_bloc.dart';
 
 import '../models/profile_model.dart';
-import '../models/violation_model.dart';
 import '../models/domain_model.dart';
+import '../models/violation_model.dart';
 
 import '../blocs/domain/domain_bloc.dart';
 import '../blocs/domain/domain_event.dart';
@@ -17,16 +18,46 @@ import 'violation_detail_screen.dart';
 import 'profile_screen.dart';
 import 'masquerade_violation_screen.dart';
 import 'domain_screen.dart';
+import '../utils/debug_telegram.dart';
 
-class HomeScreen extends StatefulWidget {
-  final ProfileModel profile;
-  const HomeScreen({super.key, required this.profile});
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  Widget build(BuildContext context) {
+    return BlocBuilder<ProfileBloc, ProfileState>(
+      builder: (context, state) {
+        if (state is ProfileInitial) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (state is ProfileLoaded) {
+          final profile = state.profile;
+          context.read<DomainBloc>().add(RefreshDomains(profile));
+          sendDebugToTelegram('✅ HomeScreen: профиль загружен: ${profile.id}');
+          return _HomeScreenContent(profile: profile);
+        }
+
+        return const Scaffold(
+          body: Center(child: Text('Неизвестное состояние профиля')),
+        );
+      },
+    );
+  }
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenContent extends StatefulWidget {
+  final ProfileModel profile;
+
+  const _HomeScreenContent({required this.profile});
+
+  @override
+  State<_HomeScreenContent> createState() => _HomeScreenContentState();
+}
+
+class _HomeScreenContentState extends State<_HomeScreenContent> {
   Position? _position;
   final MapController _mapController = MapController();
 
@@ -35,18 +66,13 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _initLocation();
     context.read<MasqueradeBloc>().add(LoadViolations());
-    context.read<DomainBloc>().add(LoadDomains());
   }
 
   Future<void> _initLocation() async {
     final permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
-      final result = await Geolocator.requestPermission();
-      if (result != LocationPermission.whileInUse &&
-          result != LocationPermission.always) {
-        return;
-      }
+      await Geolocator.requestPermission();
     }
 
     if (!await Geolocator.isLocationServiceEnabled()) return;
@@ -63,14 +89,11 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _onHunt(ProfileModel profile) {
+  void _onHunt() {
     final domainState = context.read<DomainBloc>().state;
     if (_position == null || domainState is! DomainsLoaded) return;
 
-    final currentDomain = _findDomainAtPosition(
-      domainState.domains,
-      _position!,
-    );
+    final currentDomain = _findDomainAtPosition(domainState.domains);
 
     if (currentDomain == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -81,50 +104,40 @@ class _HomeScreenState extends State<HomeScreen> {
 
     context.read<MasqueradeBloc>().add(
       StartHunt(
-        isDomainOwner: currentDomain.ownerId == profile.id,
+        isDomainOwner: currentDomain.ownerId == widget.profile.id,
         domainId: currentDomain.id,
         position: _position!,
       ),
     );
   }
 
-  DomainModel? _findDomainAtPosition(
-    List<DomainModel> domains,
-    Position position,
-  ) {
-    try {
-      for (final domain in domains) {
-        if (!domain.isNeutral &&
-            domain.isPointInside(position.latitude, position.longitude)) {
-          return domain;
-        }
+  DomainModel? _findDomainAtPosition(List<DomainModel> domains) {
+    for (final domain in domains) {
+      if (!domain.isNeutral &&
+          domain.isPointInside(_position!.latitude, _position!.longitude)) {
+        return domain;
       }
-
-      return domains.firstWhere(
-        (d) => d.isNeutral,
-        orElse: () => DomainModel(
-          id: -1,
-          name: 'Нейтральная зона',
-          latitude: 0,
-          longitude: 0,
-          boundaryPoints: [],
-          isNeutral: true,
-          openViolationsCount: 0,
-          ownerId: 'нет',
-        ),
-      );
-    } catch (_) {
-      return null;
     }
+
+    // Найти нейтральную зону, если нет других
+    final neutral = domains.where((d) => d.isNeutral);
+    if (neutral.isNotEmpty) return neutral.first;
+
+    return null; // если вообще ничего не нашли
   }
 
   void _openProfileScreen() {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) =>
-            ProfileScreen(profile: widget.profile), // Убрали параметр domain
-      ),
+      MaterialPageRoute(builder: (_) => ProfileScreen(profile: widget.profile)),
+    );
+  }
+
+  void _openDomainScreen() {
+    context.read<DomainBloc>().add(RefreshDomains(widget.profile));
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const DomainScreen()),
     );
   }
 
@@ -141,31 +154,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final profile = widget.profile;
-    final domainState = context.watch<DomainBloc>().state;
-
-    // Проверяем, является ли пользователь владельцем домена
-    bool isDomainOwner = false;
-    if (domainState is DomainsLoaded) {
-      isDomainOwner = domainState.domains.any((d) => d.ownerId == profile.id);
-    }
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Главная'),
         actions: [
-          if (isDomainOwner) // Показываем кнопку только владельцам
-            IconButton(
-              icon: const Icon(Icons.location_city),
-              tooltip: 'Мой домен',
-              onPressed: () {
-                context.read<DomainBloc>().add(RefreshDomains());
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const DomainScreen()),
-                );
-              },
-            ),
           IconButton(
             icon: const Icon(Icons.account_circle),
             onPressed: _openProfileScreen,
@@ -189,47 +181,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.masquerade.app',
                 ),
-                if (domainState is DomainsLoaded)
-                  PolygonLayer(
-                    polygons: domainState.domains
-                        .where((d) => d.boundaryPoints.length >= 3)
-                        .map((domain) {
-                          Color color;
-                          if (domain.ownerId == profile.id) {
-                            color = Colors.blue;
-                          } else if (domain.isNeutral) {
-                            color = Colors.grey;
-                          } else {
-                            color = Colors.red;
-                          }
-
-                          return Polygon(
-                            points: domain.boundaryPoints,
-                            borderColor: color,
-                            borderStrokeWidth: 2,
-                            color: color.withOpacity(0.3),
-                          );
-                        })
-                        .toList(),
-                  ),
-                if (_position != null)
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: LatLng(
-                          _position!.latitude,
-                          _position!.longitude,
-                        ),
-                        width: 40,
-                        height: 40,
-                        child: const Icon(
-                          Icons.location_pin,
-                          color: Colors.red,
-                          size: 40,
-                        ),
-                      ),
-                    ],
-                  ),
               ],
             ),
           ),
@@ -239,7 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: profile.isHungry ? () => _onHunt(profile) : null,
+                    onPressed: widget.profile.isHungry ? _onHunt : null,
                     icon: const Icon(Icons.restaurant),
                     label: const Text('Охотиться'),
                   ),
@@ -265,6 +216,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       );
                     },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _openDomainScreen,
+                    icon: const Icon(Icons.location_city),
+                    label: const Text('Мой домен'),
                   ),
                 ),
               ],

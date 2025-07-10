@@ -15,3 +15,19 @@ class SetProfile extends ProfileEvent {
   @override
   List<Object?> get props => [profile];
 }
+
+class UpdateProfile extends ProfileEvent {
+  final ProfileModel profile;
+
+  const UpdateProfile(this.profile);
+
+  @override
+  List<Object?> get props => [profile];
+}
+
+class ClearDomain extends ProfileEvent {
+  const ClearDomain();
+
+  @override
+  List<Object?> get props => [];
+}

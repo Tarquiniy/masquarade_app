@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:masquarade_app/blocs/auth/auth_bloc.dart';
+import 'package:masquarade_app/blocs/domain/domain_state.dart';
 import '../blocs/domain/domain_bloc.dart';
-import '../blocs/domain/domain_state.dart';
 import '../models/domain_model.dart';
 import '../models/profile_model.dart';
 

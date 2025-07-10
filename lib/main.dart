@@ -6,7 +6,6 @@ import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 import 'screens/home_screen.dart';
 import 'screens/enter_username_screen.dart';
-import 'screens/profile_screen.dart';
 
 import 'blocs/auth/auth_bloc.dart';
 import 'blocs/domain/domain_bloc.dart';
@@ -21,8 +20,13 @@ void main() async {
 
   await Supabase.initialize(url: supabase_url, anonKey: supabase_anonKey);
 
-  final service = SupabaseService(Supabase.instance.client);
+  final client = Supabase.instance.client;
+  final service = SupabaseService(client);
   final repository = SupabaseRepository(service);
+
+  final user = client.auth.currentUser;
+  print('🚀 App started. Current user: ${user?.id ?? "none"}');
+
   runApp(MyApp(repository: repository));
 }
 
@@ -39,7 +43,9 @@ class MyApp extends StatelessWidget {
         BlocProvider<DomainBloc>(
           create: (_) => DomainBloc(repository: repository),
         ),
-        BlocProvider<ProfileBloc>(create: (_) => ProfileBloc()),
+        BlocProvider<ProfileBloc>(
+          create: (_) => ProfileBloc(repository: repository),
+        ),
       ],
       child: MaterialApp(
         title: 'Masquerade App',
@@ -62,17 +68,19 @@ class AppEntry extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocBuilder<AuthBloc, AuthState>(
       builder: (context, state) {
+        print('🔄 AuthState: $state');
+
         if (state is Authenticated) {
           final profile = state.profile;
+          print('🔑 Authenticated: ${profile.characterName}');
 
-          // Устанавливаем профиль в ProfileBloc
           context.read<ProfileBloc>().add(SetProfile(profile));
 
           return BlocProvider(
             create: (_) =>
                 MasqueradeBloc(repository: repository, currentProfile: profile)
                   ..add(LoadViolations()),
-            child: HomeScreen(profile: profile), // Исправлено
+            child: const HomeScreen(),
           );
         }
 

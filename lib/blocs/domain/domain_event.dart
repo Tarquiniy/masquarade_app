@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'package:masquarade_app/models/profile_model.dart';
 
 abstract class DomainEvent extends Equatable {
   const DomainEvent();
@@ -8,9 +9,15 @@ abstract class DomainEvent extends Equatable {
 
 class LoadDomains extends DomainEvent {}
 
-class RefreshDomains extends DomainEvent {}
+class RefreshDomains extends DomainEvent {
+  final ProfileModel? profile;
 
-// Новое событие
+  const RefreshDomains([this.profile]);
+
+  @override
+  List<Object?> get props => [profile];
+}
+
 class LoadUserDomain extends DomainEvent {
   final String userId;
 
@@ -19,3 +26,6 @@ class LoadUserDomain extends DomainEvent {
   @override
   List<Object?> get props => [userId];
 }
+
+// Новое событие для загрузки домена текущего пользователя
+class LoadCurrentUserDomain extends DomainEvent {}
