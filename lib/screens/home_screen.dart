@@ -32,7 +32,6 @@ class HomeScreen extends StatelessWidget {
         if (state is ProfileLoaded) {
           final profile = state.profile;
           context.read<DomainBloc>().add(RefreshDomains(profile));
-          sendDebugToTelegram('✅ HomeScreen: профиль загружен: ${profile.id}');
           return _HomeScreenContent(profile: profile);
         }
 
@@ -105,7 +104,10 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
 
     if (currentDomain == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось определить территорию')),
+        const SnackBar(
+          content: Text('Не удалось определить территорию'),
+          backgroundColor: Colors.orange,
+        ),
       );
       return;
     }
@@ -153,136 +155,422 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
     );
   }
 
+  // Функция для получения иконки клана
+  IconData _getClanIcon(String clan) {
+    switch (clan.toLowerCase()) {
+      case 'ventrue':
+        return Icons.coronavirus; // Корона
+      case 'brujah':
+        return Icons.flash_on; // Молния
+      case 'toreador':
+        return Icons.brush; // Кисть
+      case 'malkavian':
+        return Icons.psychology; // Мозг
+      case 'nosferatu':
+        return Icons.visibility_off; // Скрытость
+      case 'tremere':
+        return Icons.auto_awesome; // Магия
+      case 'gangrel':
+        return Icons.pets; // Зверь
+      default:
+        return Icons.question_mark;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Главная'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.account_circle),
-            onPressed: _openProfileScreen,
+    return BlocBuilder<ProfileBloc, ProfileState>(
+      builder: (context, profileState) {
+        if (profileState is! ProfileLoaded) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final profile = profileState.profile;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(
+              'Маскарад',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 24,
+                color: Colors.white,
+                fontFamily: 'Gothic',
+                shadows: [
+                  Shadow(
+                    blurRadius: 4.0,
+                    color: Colors.black,
+                    offset: Offset(2.0, 2.0),
+                  ),
+                ],
+              ),
+            ),
+            centerTitle: true,
+            backgroundColor: Color(0xFF4A0000), // Тёмно-бордовый
+            elevation: 0,
+            flexibleSpace: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF4A0000), Color(0xFF2A0000)],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.8),
+                    spreadRadius: 1,
+                    blurRadius: 10,
+                    offset: Offset(0, 3),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              IconButton(
+                icon: Icon(Icons.account_circle, color: Colors.amber[200]),
+                onPressed: _openProfileScreen,
+                tooltip: 'Профиль',
+              ),
+              IconButton(
+                icon: Icon(Icons.my_location, color: Colors.amber[200]),
+                onPressed: _isLoadingLocation ? null : _initLocation,
+                tooltip: 'Центрировать на моём местоположении',
+              ),
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _isLoadingLocation ? null : _initLocation,
+          body: BlocListener<MasqueradeBloc, MasqueradeState>(
+            listener: (context, state) {
+              // Показываем уведомления о результатах охоты
+              if (state is HuntCompleted) {
+                if (state.violationOccurred) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Охота успешна! Но создано нарушение маскарада '
+                        '(стоимость закрытия: ${state.costToClose} влияния)',
+                      ),
+                      backgroundColor: Colors.amber[800],
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Охота прошла успешно! Голод утолён'),
+                      backgroundColor: Color(0xFF006400),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                }
+              }
+
+              // Уведомление о созданном нарушении
+              if (state is ViolationReportedSuccessfully) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Нарушение маскарада успешно создано!'),
+                    backgroundColor: Color(0xFF8B0000),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+            child: BlocListener<DomainBloc, DomainState>(
+              listener: (context, state) {
+                if (state is CurrentUserDomainLoaded) {
+                  setState(() {
+                    _currentUserDomain = state.domain;
+                  });
+                }
+              },
+              child: Stack(
+                children: [
+                  FlutterMap(
+                    mapController: _mapController,
+                    options: MapOptions(
+                      initialCenter: _position != null
+                          ? LatLng(_position!.latitude, _position!.longitude)
+                          : const LatLng(55.751244, 37.618423),
+                      initialZoom: 13,
+                      interactionOptions: const InteractionOptions(
+                        flags: ~InteractiveFlag.doubleTapDragZoom,
+                      ),
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate:
+                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'com.masquerade.app',
+                      ),
+                      if (_currentUserDomain != null &&
+                          _currentUserDomain!.boundaryPoints.isNotEmpty)
+                        PolygonLayer(
+                          polygons: [
+                            Polygon(
+                              points: _currentUserDomain!.boundaryPoints,
+                              color: Color(0xFF8B0000).withOpacity(0.3),
+                              borderColor: Color(0xFFD4AF37),
+                              borderStrokeWidth: 2,
+                            ),
+                          ],
+                        ),
+                      if (_position != null)
+                        MarkerLayer(
+                          markers: [
+                            Marker(
+                              point: LatLng(
+                                _position!.latitude,
+                                _position!.longitude,
+                              ),
+                              width: 48,
+                              height: 48,
+                              child: Icon(
+                                _getClanIcon(profile.clan),
+                                color: Color(0xFFD4AF37),
+                                size: 48,
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                  if (_isLoadingLocation)
+                    Center(
+                      child: Container(
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.7),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: CircularProgressIndicator(
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Color(0xFFD4AF37),
+                          ),
+                        ),
+                      ),
+                    ),
+                  // Статус-бар с информацией о персонаже
+                  Positioned(
+                    top: 10,
+                    left: 10,
+                    right: 10,
+                    child: _buildCharacterStatusBar(profile),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          floatingActionButtonLocation:
+              FloatingActionButtonLocation.centerFloat,
+          floatingActionButton: Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.5),
+                    blurRadius: 10,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildActionButton(
+                    icon: Icons.restaurant,
+                    label: 'Охотиться',
+                    color: Color(0xFF8B0000),
+                    onPressed: profile.isHungry ? _onHunt : null,
+                  ),
+                  _buildActionButton(
+                    icon: Icons.warning,
+                    label: 'Нарушить',
+                    color: Color(0xFF4A0000),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => BlocProvider.value(
+                            value: context.read<MasqueradeBloc>(),
+                            child: MasqueradeViolationScreen(profile: profile),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  _buildActionButton(
+                    icon: Icons.location_city,
+                    label: 'Домен',
+                    color: Color(0xFF2A0000),
+                    onPressed: _openDomainScreen,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Виджет статус-бара персонажа
+  Widget _buildCharacterStatusBar(ProfileModel profile) {
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: Color(0xFF1A1A1A).withOpacity(0.8),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: Color(0xFFD4AF37).withOpacity(0.5),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5),
+            blurRadius: 10,
+            spreadRadius: 2,
           ),
         ],
       ),
-      body: BlocListener<DomainBloc, DomainState>(
-        listener: (context, state) {
-          if (state is CurrentUserDomainLoaded) {
-            setState(() {
-              _currentUserDomain = state.domain;
-            });
-          }
-        },
-        child: Stack(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
           children: [
-            FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: _position != null
-                    ? LatLng(_position!.latitude, _position!.longitude)
-                    : const LatLng(55.751244, 37.618423),
-                initialZoom: 13,
-                interactionOptions: const InteractionOptions(
-                  flags: ~InteractiveFlag.doubleTapDragZoom,
-                ),
+            Container(
+              padding: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Color(0xFFD4AF37), width: 2),
+                color: Colors.black.withOpacity(0.5),
               ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.masquerade.app',
-                ),
-                if (_currentUserDomain != null &&
-                    _currentUserDomain!.boundaryPoints.isNotEmpty)
-                  PolygonLayer(
-                    polygons: [
-                      Polygon(
-                        points: _currentUserDomain!.boundaryPoints,
-                        color: Colors.blue.withOpacity(0.3),
-                        borderColor: Colors.blue,
-                        borderStrokeWidth: 2,
-                      ),
-                    ],
-                  ),
-                if (_position != null)
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: LatLng(
-                          _position!.latitude,
-                          _position!.longitude,
-                        ),
-                        width: 40,
-                        height: 40,
-                        child: const Icon(
-                          Icons.location_pin,
-                          color: Colors.red,
-                          size: 40,
-                        ),
-                      ),
-                    ],
-                  ),
-              ],
+              child: Icon(
+                _getClanIcon(profile.clan),
+                color: Color(0xFFD4AF37),
+                size: 30,
+              ),
             ),
-            if (_isLoadingLocation)
-              const Center(child: CircularProgressIndicator()),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    profile.characterName,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Colors.white,
+                      fontFamily: 'Gothic',
+                      shadows: [
+                        Shadow(
+                          blurRadius: 2.0,
+                          color: Colors.black,
+                          offset: Offset(1.0, 1.0),
+                        ),
+                      ],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    '${profile.clan}, ${profile.sect}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.amber[200],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            _buildStatusIndicator(
+              icon: Icons.favorite,
+              value: profile.hunger,
+              color: Color(0xFF8B0000),
+              max: 5,
+            ),
+            const SizedBox(width: 8),
+            _buildStatusIndicator(
+              icon: Icons.coronavirus,
+              value: profile.influence,
+              color: Color(0xFFD4AF37),
+              max: 10,
+            ),
           ],
         ),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 70),
+    );
+  }
+
+  // Виджет индикатора статуса
+  Widget _buildStatusIndicator({
+    required IconData icon,
+    required int value,
+    required Color color,
+    required int max,
+  }) {
+    return Tooltip(
+      message: '${value}/$max',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withOpacity(0.5)),
+        ),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            ElevatedButton.icon(
-              onPressed: widget.profile.isHungry ? _onHunt : null,
-              icon: const Icon(Icons.restaurant),
-              label: const Text('Охотиться'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-              ),
-            ),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.warning),
-              label: const Text('Нарушить'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFe94560),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-              ),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => BlocProvider.value(
-                      value: context.read<MasqueradeBloc>(),
-                      child: MasqueradeViolationScreen(profile: widget.profile),
-                    ),
-                  ),
-                );
-              },
-            ),
-            ElevatedButton.icon(
-              onPressed: _openDomainScreen,
-              icon: const Icon(Icons.location_city),
-              label: const Text('Домен'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 6),
+            Text(
+              '$value',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: color,
+                fontSize: 16,
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // Виджет кнопки действия
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback? onPressed,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, color: Color(0xFFD4AF37), size: 24),
+        label: Text(
+          label,
+          style: TextStyle(
+            color: Color(0xFFD4AF37),
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            fontFamily: 'Gothic',
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color.withOpacity(0.9),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(25),
+            side: BorderSide(color: Color(0xFFD4AF37), width: 1.5),
+          ),
+          elevation: 5,
+          shadowColor: Colors.black.withOpacity(0.5),
         ),
       ),
     );
