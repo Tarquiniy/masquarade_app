@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:masquarade_app/blocs/profile/profile_bloc.dart';
 import 'package:masquarade_app/utils/debug_telegram.dart';
 import 'package:uuid/uuid.dart';
 
@@ -19,9 +20,13 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
   final ProfileModel currentProfile;
   final Random _random = Random();
   final Uuid _uuid = const Uuid();
+  final ProfileBloc profileBloc;
 
-  MasqueradeBloc({required this.repository, required this.currentProfile})
-    : super(ViolationsLoading()) {
+  MasqueradeBloc({
+    required this.repository,
+    required this.currentProfile,
+    required this.profileBloc,
+  }) : super(ViolationsLoading()) {
     on<LoadViolations>(_onLoadViolations);
     on<ReportViolation>(_onReportViolation);
     on<StartHunt>(_onStartHunt);
@@ -149,8 +154,8 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
         'Игрок: ${currentProfile.characterName}',
       );
       final violation = await repository.getViolationById(event.violationId);
-      if (violation == null) {
-        emit(ViolationsError('Нарушение не найдено'));
+      if (violation == null || !violation.canBeClosed) {
+        emit(ViolationsError('Нарушение уже закрыто или не существует'));
         return;
       }
 
@@ -160,8 +165,17 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
         return;
       }
 
+      // Используем общее влияние (базовое + административное)
+      final totalInfluence = domain.totalInfluence;
       if (currentProfile.influence < violation.costToClose) {
-        emit(ViolationsError('Недостаточно влияния для закрытия нарушения'));
+        emit(
+          ViolationsError(
+            'Недостаточно влияния для закрытия нарушения. '
+            'Требуется: ${violation.costToClose}, '
+            'Ваше влияние: ${currentProfile.influence}, '
+            'Общее влияние домена: $totalInfluence',
+          ),
+        );
         return;
       }
 
@@ -169,6 +183,11 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
 
       final newInfluence = currentProfile.influence - violation.costToClose;
       await repository.updateInfluence(currentProfile.id, newInfluence);
+
+      // Обновляем профиль через ProfileBloc
+      profileBloc.add(
+        UpdateProfile(currentProfile.copyWith(influence: newInfluence)),
+      );
 
       add(LoadViolations());
       emit(ViolationClosedSuccessfully());
@@ -188,8 +207,8 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
         'Игрок: ${currentProfile.characterName}',
       );
       final violation = await repository.getViolationById(event.violationId);
-      if (violation == null) {
-        emit(ViolationsError('Нарушение не найдено'));
+      if (violation == null || !violation.canBeRevealed) {
+        emit(ViolationsError('Нарушитель уже раскрыт или невозможно раскрыть'));
         return;
       }
 
@@ -206,10 +225,39 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
         return;
       }
 
+      final domain = await repository.getDomainById(violation.domainId);
+      if (domain == null) {
+        emit(ViolationsError('Домен не найден'));
+        return;
+      }
+
+      // Используем общее влияние (базовое + административное)
+      final totalInfluence = domain.totalInfluence;
+      if (currentProfile.influence < violation.costToReveal) {
+        emit(
+          ViolationsError(
+            'Недостаточно влияния для раскрытия. '
+            'Требуется: ${violation.costToReveal}, '
+            'Ваше влияние: ${currentProfile.influence}, '
+            'Общее влияние домена: $totalInfluence',
+          ),
+        );
+        return;
+      }
+
       await repository.revealViolation(
         id: violation.id,
         violatorName: violatorProfile.characterName,
         revealedAt: DateTime.now().toIso8601String(),
+      );
+
+      // Списываем стоимость
+      final newInfluence = currentProfile.influence - violation.costToReveal;
+      await repository.updateInfluence(currentProfile.id, newInfluence);
+
+      // Обновляем профиль через ProfileBloc
+      profileBloc.add(
+        UpdateProfile(currentProfile.copyWith(influence: newInfluence)),
       );
 
       add(LoadViolations());

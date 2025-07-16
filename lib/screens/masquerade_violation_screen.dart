@@ -155,6 +155,10 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
             'Цена закрытия для владельца: ${_hungerSpent * 2} влияния',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
+          Text(
+            'Общее влияние домена: ${_domain!.totalInfluence}',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: () => setState(() => _step = 1),

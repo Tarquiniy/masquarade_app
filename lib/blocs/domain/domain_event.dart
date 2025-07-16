@@ -27,5 +27,4 @@ class LoadUserDomain extends DomainEvent {
   List<Object?> get props => [userId];
 }
 
-// Новое событие для загрузки домена текущего пользователя
 class LoadCurrentUserDomain extends DomainEvent {}

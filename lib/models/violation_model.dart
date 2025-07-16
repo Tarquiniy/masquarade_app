@@ -10,7 +10,7 @@ class ViolationModel {
   final String description;
   final int hungerSpent;
   final int costToClose;
-  final int costToReveal; // ✅ добавлено
+  final int costToReveal;
   final ViolationStatus status;
   final bool violatorKnown;
   final DateTime createdAt;
@@ -28,7 +28,7 @@ class ViolationModel {
     required this.description,
     required this.hungerSpent,
     required this.costToClose,
-    required this.costToReveal, // ✅ добавлено
+    required this.costToReveal,
     required this.status,
     required this.violatorKnown,
     required this.createdAt,
@@ -49,7 +49,7 @@ class ViolationModel {
         description: json['description'] as String,
         hungerSpent: json['hunger_spent'] ?? 0,
         costToClose: json['cost_to_close'] ?? 0,
-        costToReveal: json['cost_to_reveal'] ?? 0, // ✅ добавлено
+        costToReveal: json['cost_to_reveal'] ?? 0,
         status: _statusFromString(json['status']),
         violatorKnown: json['violator_known'] ?? false,
         createdAt: DateTime.parse(json['created_at']),
@@ -77,7 +77,7 @@ class ViolationModel {
       'description': description,
       'hunger_spent': hungerSpent,
       'cost_to_close': costToClose,
-      'cost_to_reveal': costToReveal, // ✅ добавлено
+      'cost_to_reveal': costToReveal,
       'status': _statusToString(status),
       'violator_known': violatorKnown,
       'created_at': createdAt.toIso8601String(),
@@ -153,7 +153,14 @@ class ViolationModel {
   bool get isRevealed => status == ViolationStatus.revealed;
   bool get canBeRevealed {
     final now = DateTime.now();
+    // Добавляем проверку, что нарушение еще не было раскрыто или закрыто
     return !isRevealed && !isClosed && now.difference(createdAt).inHours <= 24;
+  }
+
+  // Добавляем новый геттер для проверки возможности закрытия
+  bool get canBeClosed {
+    // Закрыть можно только открытые нарушения
+    return status == ViolationStatus.open;
   }
 
   LatLng get position => LatLng(latitude, longitude);

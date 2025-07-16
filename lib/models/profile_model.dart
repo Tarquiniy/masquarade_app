@@ -8,11 +8,12 @@ class ProfileModel {
   final int bloodPower;
   final int hunger;
   final int influence;
-  final int? domainId; // Изменено на ID домена
+  final int? domainId;
   final String role;
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? external_name;
+  final int adminInfluence;
 
   ProfileModel({
     required this.id,
@@ -24,11 +25,12 @@ class ProfileModel {
     required this.bloodPower,
     required this.hunger,
     required this.influence,
-    required this.domainId, // Обновлено
+    required this.domainId,
     required this.role,
     required this.createdAt,
     required this.updatedAt,
     this.external_name,
+    this.adminInfluence = 0,
   });
 
   factory ProfileModel.fromJson(Map<String, dynamic> json) {
@@ -53,6 +55,7 @@ class ProfileModel {
         json['updated_at'] ?? DateTime.now().toIso8601String(),
       ),
       external_name: json['external_name'],
+      adminInfluence: (json['admin_influence'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -67,12 +70,17 @@ class ProfileModel {
       'blood_power': bloodPower,
       'hunger': hunger,
       'influence': influence,
-      'domain_id': domainId, // Обновлено
+      'domain_id': domainId,
       'role': role,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
       'telegram_username': external_name,
+      'admin_influence': adminInfluence,
     };
+  }
+
+  int get totalInfluence {
+    return influence + adminInfluence;
   }
 
   bool get isDomainOwner => domainId != null;

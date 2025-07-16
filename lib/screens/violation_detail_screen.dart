@@ -34,6 +34,10 @@ class ViolationDetailScreen extends StatelessWidget {
               'Стоимость закрытия',
               violation.costToClose.toString(),
             ),
+            _buildInfoRow(
+              'Стоимость раскрытия',
+              violation.costToReveal.toString(),
+            ),
 
             if (violation.isRevealed)
               _buildInfoRow(

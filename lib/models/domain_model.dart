@@ -10,10 +10,11 @@ class DomainModel {
   final double longitude;
   final List<LatLng> boundaryPoints;
   final int securityLevel;
-  final int influenceLevel;
+  late final int influenceLevel;
   final int income;
   final bool isNeutral;
   final int openViolationsCount;
+  final int adminInfluence;
 
   DomainModel({
     required this.id,
@@ -27,6 +28,7 @@ class DomainModel {
     this.income = 0,
     this.isNeutral = false,
     this.openViolationsCount = 0,
+    this.adminInfluence = 0,
   });
 
   factory DomainModel.fromJson(Map<String, dynamic> json) {
@@ -69,6 +71,7 @@ class DomainModel {
       isNeutral: json['isNeutral'] as bool? ?? false,
       openViolationsCount:
           (json['open_violations_count'] as num?)?.toInt() ?? 0,
+      adminInfluence: (json['admin_influence'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -87,20 +90,48 @@ class DomainModel {
       'income': income,
       'isNeutral': isNeutral,
       'open_violations_count': openViolationsCount,
+      'admin_influence': adminInfluence,
     };
+  }
+
+  int get totalInfluence {
+    return securityLevel + adminInfluence;
   }
 
   bool isPointInside(double lat, double lng) {
     try {
       if (isNeutral) return true;
-
       if (boundaryPoints.isEmpty) return false;
 
-      final distance = Distance();
-      final center = LatLng(latitude, longitude);
       final point = LatLng(lat, lng);
+      final distance = Distance();
 
-      return distance(center, point) < 1000;
+      // Проверка расстояния до центра
+      final centerDistance = distance(LatLng(latitude, longitude), point);
+      if (centerDistance > 2000) return false;
+
+      // Проверка принадлежности к полигону
+      bool isInside = false;
+      var j = boundaryPoints.length - 1;
+
+      for (int i = 0; i < boundaryPoints.length; i++) {
+        final p1 = boundaryPoints[i];
+        final p2 = boundaryPoints[j];
+
+        if (p1.longitude < point.longitude && p2.longitude >= point.longitude ||
+            p2.longitude < point.longitude && p1.longitude >= point.longitude) {
+          if (p1.latitude +
+                  (point.longitude - p1.longitude) /
+                      (p2.longitude - p1.longitude) *
+                      (p2.latitude - p1.latitude) <
+              point.latitude) {
+            isInside = !isInside;
+          }
+        }
+        j = i;
+      }
+
+      return isInside;
     } catch (e) {
       print('Ошибка проверки точки в домене: $e');
       return false;

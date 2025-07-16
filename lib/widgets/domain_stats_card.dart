@@ -23,7 +23,7 @@ class DomainStatsCard extends StatelessWidget {
             _buildStatRow('Защищенность', domain.securityLevel.toString()),
             _buildStatRow(
               'Влиятельность',
-              '${domain.influenceLevel}/${domain.influenceLevel}',
+              '${domain.totalInfluence} (${domain.influenceLevel} + ${domain.adminInfluence})',
             ),
             _buildStatRow('Доходность', '${domain.income} пунктов голода'),
           ],

@@ -68,18 +68,16 @@ class AppEntry extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocBuilder<AuthBloc, AuthState>(
       builder: (context, state) {
-        print('🔄 AuthState: $state');
-
         if (state is Authenticated) {
           final profile = state.profile;
-          print('🔑 Authenticated: ${profile.characterName}');
-
           context.read<ProfileBloc>().add(SetProfile(profile));
 
           return BlocProvider(
-            create: (_) =>
-                MasqueradeBloc(repository: repository, currentProfile: profile)
-                  ..add(LoadViolations()),
+            create: (_) => MasqueradeBloc(
+              repository: repository,
+              currentProfile: profile,
+              profileBloc: context.read<ProfileBloc>(), // Передаем ProfileBloc
+            )..add(LoadViolations()),
             child: const HomeScreen(),
           );
         }
