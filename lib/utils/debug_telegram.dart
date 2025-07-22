@@ -12,7 +12,7 @@ Future<void> sendDebugToTelegram(String message) async {
 
     // Форматируем сообщение с сохранением переносов строк
     final formattedMessage = message
-        .replaceAll('\n', ' f')
+        .replaceAll('\n', ' ')
         .replaceAll('%20', ' ');
 
     final response = await http.post(

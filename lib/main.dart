@@ -50,8 +50,34 @@ class MyApp extends StatelessWidget {
       child: MaterialApp(
         title: 'Masquerade App',
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+          colorScheme: ColorScheme.dark(
+            primary: Color(0xFF8b0000),
+            secondary: Color(0xFFd4af37),
+            surface: Color(0xFF2a0000),
+            background: Color(0xFF1a0000),
+          ),
+          scaffoldBackgroundColor: Color(0xFF1a0000),
+          cardColor: Color(0xFF2a0000),
           useMaterial3: true,
+          textTheme: TextTheme(
+            bodyLarge: TextStyle(color: Colors.white70),
+            bodyMedium: TextStyle(color: Colors.white70),
+            titleLarge: TextStyle(color: Colors.amber[200]),
+          ),
+          appBarTheme: AppBarTheme(
+            backgroundColor: Color(0xFF4A0000),
+            titleTextStyle: TextStyle(
+              color: Colors.amber[200],
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Color(0xFF8b0000),
+              foregroundColor: Colors.amber[200],
+            ),
+          ),
         ),
         home: AppEntry(repository: repository),
       ),
@@ -68,15 +94,19 @@ class AppEntry extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocBuilder<AuthBloc, AuthState>(
       builder: (context, state) {
+        print('🔄 AuthState: $state');
+
         if (state is Authenticated) {
           final profile = state.profile;
+          print('🔑 Authenticated: ${profile.characterName}');
+
           context.read<ProfileBloc>().add(SetProfile(profile));
 
           return BlocProvider(
             create: (_) => MasqueradeBloc(
               repository: repository,
               currentProfile: profile,
-              profileBloc: context.read<ProfileBloc>(), // Передаем ProfileBloc
+              profileBloc: context.read<ProfileBloc>(), // ДОБАВЛЕНО
             )..add(LoadViolations()),
             child: const HomeScreen(),
           );

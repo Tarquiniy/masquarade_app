@@ -7,13 +7,13 @@ class ProfileModel {
   final List<String> disciplines;
   final int bloodPower;
   final int hunger;
-  final int influence;
   final int? domainId;
   final String role;
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? external_name;
   final int adminInfluence;
+  final List<Map<String, dynamic>> pillars;
 
   ProfileModel({
     required this.id,
@@ -24,13 +24,13 @@ class ProfileModel {
     required this.disciplines,
     required this.bloodPower,
     required this.hunger,
-    required this.influence,
     required this.domainId,
     required this.role,
     required this.createdAt,
     required this.updatedAt,
     this.external_name,
     this.adminInfluence = 0,
+    required this.pillars,
   });
 
   factory ProfileModel.fromJson(Map<String, dynamic> json) {
@@ -43,7 +43,6 @@ class ProfileModel {
       disciplines: List<String>.from(json['disciplines'] ?? []),
       bloodPower: json['blood_power'] ?? 0,
       hunger: json['hunger'] ?? 0,
-      influence: json['influence'] ?? 0,
       domainId: json['domain_id'] != null
           ? int.tryParse(json['domain_id'].toString())
           : null,
@@ -56,6 +55,9 @@ class ProfileModel {
       ),
       external_name: json['external_name'],
       adminInfluence: (json['admin_influence'] as num?)?.toInt() ?? 0,
+      pillars: List<Map<String, dynamic>>.from(
+        json['pillars'] ?? [],
+      ), // Чтение столпов
     );
   }
 
@@ -69,18 +71,14 @@ class ProfileModel {
       'disciplines': disciplines,
       'blood_power': bloodPower,
       'hunger': hunger,
-      'influence': influence,
       'domain_id': domainId,
       'role': role,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
       'telegram_username': external_name,
       'admin_influence': adminInfluence,
+      'pillars': pillars,
     };
-  }
-
-  int get totalInfluence {
-    return influence + adminInfluence;
   }
 
   bool get isDomainOwner => domainId != null;
@@ -97,12 +95,12 @@ class ProfileModel {
     List<String>? disciplines,
     int? bloodPower,
     int? hunger,
-    int? influence,
     int? domainId,
     String? role,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? external_name,
+    List<Map<String, dynamic>>? pillars,
   }) {
     return ProfileModel(
       id: id ?? this.id,
@@ -113,12 +111,12 @@ class ProfileModel {
       disciplines: disciplines ?? List.from(this.disciplines),
       bloodPower: bloodPower ?? this.bloodPower,
       hunger: hunger ?? this.hunger,
-      influence: influence ?? this.influence,
       domainId: domainId ?? this.domainId,
       role: role ?? this.role,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       external_name: external_name ?? this.external_name,
+      pillars: pillars ?? List.from(this.pillars),
     );
   }
 }

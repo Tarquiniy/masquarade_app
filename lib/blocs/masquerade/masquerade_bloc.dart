@@ -64,6 +64,7 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
         latitude: event.latitude,
         longitude: event.longitude,
         domainId: event.domainId,
+        isHunt: false, // Ручное нарушение, не охота
         emit: emit,
       );
     } catch (e, stack) {
@@ -95,8 +96,15 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
         return;
       }
 
+      // Уменьшаем голод за охоту
       final newHunger = currentProfile.hunger - 1;
-      await repository.updateHunger(currentProfile.id, newHunger);
+      final updatedProfile = await repository.updateHunger(
+        currentProfile.id,
+        newHunger,
+      );
+      if (updatedProfile != null) {
+        profileBloc.add(UpdateProfile(updatedProfile));
+      }
 
       final violationProbability = event.isDomainOwner ? 0.25 : 0.5;
       final violationOccurs = _random.nextDouble() < violationProbability;
@@ -122,6 +130,7 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
           latitude: event.position.latitude,
           longitude: event.position.longitude,
           domainId: event.domainId,
+          isHunt: true, // Нарушение при охоте
           emit: emit,
         );
       }
@@ -165,29 +174,26 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
         return;
       }
 
-      // Используем общее влияние (базовое + административное)
-      final totalInfluence = domain.totalInfluence;
-      if (currentProfile.influence < violation.costToClose) {
+      // Используем только влияние домена
+      final domainInfluence = domain.totalInfluence;
+      if (domainInfluence < violation.costToClose) {
         emit(
           ViolationsError(
-            'Недостаточно влияния для закрытия нарушения. '
+            'Недостаточно влияния домена для закрытия нарушения. '
             'Требуется: ${violation.costToClose}, '
-            'Ваше влияние: ${currentProfile.influence}, '
-            'Общее влияние домена: $totalInfluence',
+            'Влияние домена: $domainInfluence',
           ),
         );
         return;
       }
 
-      await repository.closeViolation(violation.id, currentProfile.id);
-
-      final newInfluence = currentProfile.influence - violation.costToClose;
-      await repository.updateInfluence(currentProfile.id, newInfluence);
-
-      // Обновляем профиль через ProfileBloc
-      profileBloc.add(
-        UpdateProfile(currentProfile.copyWith(influence: newInfluence)),
+      // Обновляем влияние домена перед закрытием
+      await repository.updateDomainInfluence(
+        domain.id,
+        domain.adminInfluence - violation.costToClose,
       );
+
+      await repository.closeViolation(violation.id, currentProfile.id);
 
       add(LoadViolations());
       emit(ViolationClosedSuccessfully());
@@ -231,33 +237,29 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
         return;
       }
 
-      // Используем общее влияние (базовое + административное)
-      final totalInfluence = domain.totalInfluence;
-      if (currentProfile.influence < violation.costToReveal) {
+      // Используем только влияние домена
+      final domainInfluence = domain.totalInfluence;
+      if (domainInfluence < violation.costToReveal) {
         emit(
           ViolationsError(
-            'Недостаточно влияния для раскрытия. '
+            'Недостаточно влияния домена для раскрытия. '
             'Требуется: ${violation.costToReveal}, '
-            'Ваше влияние: ${currentProfile.influence}, '
-            'Общее влияние домена: $totalInfluence',
+            'Влияние домена: $domainInfluence',
           ),
         );
         return;
       }
 
+      // Обновляем влияние домена перед раскрытием
+      await repository.updateDomainInfluence(
+        domain.id,
+        domain.adminInfluence - violation.costToReveal,
+      );
+
       await repository.revealViolation(
         id: violation.id,
         violatorName: violatorProfile.characterName,
         revealedAt: DateTime.now().toIso8601String(),
-      );
-
-      // Списываем стоимость
-      final newInfluence = currentProfile.influence - violation.costToReveal;
-      await repository.updateInfluence(currentProfile.id, newInfluence);
-
-      // Обновляем профиль через ProfileBloc
-      profileBloc.add(
-        UpdateProfile(currentProfile.copyWith(influence: newInfluence)),
       );
 
       add(LoadViolations());
@@ -273,6 +275,7 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
     required double latitude,
     required double longitude,
     required int domainId,
+    required bool isHunt, // Определяет тип нарушения (охота/ручное)
     required Emitter<MasqueradeState> emit,
   }) async {
     final id = _uuid.v4();
@@ -282,6 +285,7 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
       'Игрок: ${currentProfile.characterName} (${currentProfile.id})\n'
       'Описание: $description\n'
       'Голод: $hungerSpent\n'
+      'Тип: ${isHunt ? "Охота" : "Ручное"}\n'
       'Домен: $domainId\n'
       'Координаты: $latitude, $longitude',
     );
@@ -307,8 +311,17 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
 
     await repository.createViolation(violation);
 
-    final updatedHunger = currentProfile.hunger - hungerSpent;
-    await repository.updateHunger(currentProfile.id, updatedHunger);
+    // Только для ручных нарушений увеличиваем голод
+    if (!isHunt) {
+      final newHunger = currentProfile.hunger + hungerSpent;
+      final updatedProfile = await repository.updateHunger(
+        currentProfile.id,
+        newHunger,
+      );
+      if (updatedProfile != null) {
+        profileBloc.add(UpdateProfile(updatedProfile));
+      }
+    }
 
     add(LoadViolations());
     emit(ViolationReportedSuccessfully());

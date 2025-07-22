@@ -31,3 +31,12 @@ class ClearDomain extends ProfileEvent {
   @override
   List<Object?> get props => [];
 }
+
+class DestroyPillar extends ProfileEvent {
+  final String pillarName;
+
+  const DestroyPillar(this.pillarName);
+
+  @override
+  List<Object?> get props => [pillarName];
+}

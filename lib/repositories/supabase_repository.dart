@@ -114,7 +114,7 @@ class SupabaseRepository {
     return service.createViolation(violation);
   }
 
-  Future<void> updateHunger(String profileId, int hunger) {
+  Future<ProfileModel?> updateHunger(String profileId, int hunger) async {
     return service.updateHunger(profileId, hunger);
   }
 
@@ -147,6 +147,11 @@ class SupabaseRepository {
       _profileController.add(null);
       return null;
     }
+  }
+
+  // Новый метод для обновления влияния домена
+  Future<void> updateDomainInfluence(int domainId, int newInfluence) async {
+    await service.updateDomainInfluence(domainId, newInfluence);
   }
 
   void dispose() {

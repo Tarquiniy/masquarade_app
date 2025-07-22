@@ -14,6 +14,7 @@ import '../blocs/masquerade/masquerade_bloc.dart';
 import 'profile_screen.dart';
 import 'masquerade_violation_screen.dart';
 import 'domain_screen.dart';
+import 'coin_flip_screen.dart'; // Добавлен экран монетки
 import '../utils/debug_telegram.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -159,19 +160,19 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
   IconData _getClanIcon(String clan) {
     switch (clan.toLowerCase()) {
       case 'ventrue':
-        return Icons.coronavirus; // Корона
+        return Icons.coronavirus;
       case 'brujah':
-        return Icons.flash_on; // Молния
+        return Icons.flash_on;
       case 'toreador':
-        return Icons.brush; // Кисть
+        return Icons.brush;
       case 'malkavian':
-        return Icons.psychology; // Мозг
+        return Icons.psychology;
       case 'nosferatu':
-        return Icons.visibility_off; // Скрытость
+        return Icons.visibility_off;
       case 'tremere':
-        return Icons.auto_awesome; // Магия
+        return Icons.auto_awesome;
       case 'gangrel':
-        return Icons.pets; // Зверь
+        return Icons.pets;
       default:
         return Icons.question_mark;
     }
@@ -208,7 +209,7 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
               ),
             ),
             centerTitle: true,
-            backgroundColor: Color(0xFF4A0000), // Тёмно-бордовый
+            backgroundColor: Color(0xFF4A0000),
             elevation: 0,
             flexibleSpace: Container(
               decoration: BoxDecoration(
@@ -242,7 +243,6 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
           ),
           body: BlocListener<MasqueradeBloc, MasqueradeState>(
             listener: (context, state) {
-              // Показываем уведомления о результатах охоты
               if (state is HuntCompleted) {
                 if (state.violationOccurred) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -266,7 +266,6 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
                 }
               }
 
-              // Уведомление о созданном нарушении
               if (state is ViolationReportedSuccessfully) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
@@ -409,6 +408,18 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
                     color: Color(0xFF2A0000),
                     onPressed: _openDomainScreen,
                   ),
+                  // Новая кнопка для броска монетки
+                  _buildActionButton(
+                    icon: Icons.monetization_on,
+                    label: 'Монетка',
+                    color: Color(0xFF4A0000),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => CoinFlipScreen()),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
@@ -420,90 +431,100 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
 
   // Виджет статус-бара персонажа
   Widget _buildCharacterStatusBar(ProfileModel profile) {
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: Color(0xFF1A1A1A).withOpacity(0.8),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Color(0xFFD4AF37).withOpacity(0.5),
-          width: 1.5,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.5),
-            blurRadius: 10,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            Container(
-              padding: EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Color(0xFFD4AF37), width: 2),
+    return BlocBuilder<ProfileBloc, ProfileState>(
+      builder: (context, state) {
+        // Используем актуальное состояние профиля
+        final currentProfile = (state is ProfileLoaded)
+            ? state.profile
+            : profile;
+        return Container(
+          margin: EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: Color(0xFF1A1A1A).withOpacity(0.8),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Color(0xFFD4AF37).withOpacity(0.5),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
                 color: Colors.black.withOpacity(0.5),
+                blurRadius: 10,
+                spreadRadius: 2,
               ),
-              child: Icon(
-                _getClanIcon(profile.clan),
-                color: Color(0xFFD4AF37),
-                size: 30,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    profile.characterName,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Colors.white,
-                      fontFamily: 'Gothic',
-                      shadows: [
-                        Shadow(
-                          blurRadius: 2.0,
-                          color: Colors.black,
-                          offset: Offset(1.0, 1.0),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Color(0xFFD4AF37), width: 2),
+                    color: Colors.black.withOpacity(0.5),
+                  ),
+                  child: Icon(
+                    _getClanIcon(profile.clan),
+                    color: Color(0xFFD4AF37),
+                    size: 30,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        profile.characterName,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18, // Увеличенный размер
+                          color: Colors.amber[200], // Яркий контрастный цвет
+                          fontFamily: 'Gothic',
+                          shadows: [
+                            Shadow(
+                              blurRadius: 6.0, // Усиленная тень
+                              color: Colors.black,
+                              offset: Offset(2.0, 2.0),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    overflow: TextOverflow.ellipsis,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '${profile.clan}, ${profile.sect}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.amber[200],
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
                   ),
-                  Text(
-                    '${profile.clan}, ${profile.sect}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.amber[200],
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 12),
+                // Индикатор голода
+                _buildStatusIndicator(
+                  icon: Icons.favorite,
+                  value: currentProfile.hunger,
+                  color: Color(0xFF8B0000),
+                  max: 5,
+                ),
+                const SizedBox(width: 8),
+                // Индикатор силы крови
+                _buildStatusIndicator(
+                  icon: Icons.whatshot,
+                  value: currentProfile.bloodPower,
+                  color: Color(0xFFB22222),
+                  max: 10,
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            _buildStatusIndicator(
-              icon: Icons.favorite,
-              value: profile.hunger,
-              color: Color(0xFF8B0000),
-              max: 5,
-            ),
-            const SizedBox(width: 8),
-            _buildStatusIndicator(
-              icon: Icons.coronavirus,
-              value: profile.influence,
-              color: Color(0xFFD4AF37),
-              max: 10,
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 

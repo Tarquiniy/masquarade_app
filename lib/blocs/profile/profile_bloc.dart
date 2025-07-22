@@ -13,6 +13,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     on<SetProfile>(_onSetProfile);
     on<UpdateProfile>(_onUpdateProfile);
     on<ClearDomain>(_onClearDomain);
+    on<DestroyPillar>(_onDestroyPillar);
   }
 
   void _onSetProfile(SetProfile event, Emitter<ProfileState> emit) {
@@ -21,6 +22,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
   void _onUpdateProfile(UpdateProfile event, Emitter<ProfileState> emit) {
     if (state is ProfileLoaded) {
+      // проверка на загрузку профиля
       emit(ProfileLoaded(event.profile));
     }
   }
@@ -29,6 +31,21 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
     if (state is ProfileLoaded) {
       final currentProfile = (state as ProfileLoaded).profile;
       emit(ProfileLoaded(currentProfile.copyWith(domainId: null)));
+    }
+  }
+
+  // Обработчик разрушения столпа
+  void _onDestroyPillar(DestroyPillar event, Emitter<ProfileState> emit) {
+    if (state is ProfileLoaded) {
+      final currentProfile = (state as ProfileLoaded).profile;
+      final updatedPillars = currentProfile.pillars.map((pillar) {
+        if (pillar['name'] == event.pillarName) {
+          return {...pillar, 'destroyed': true};
+        }
+        return pillar;
+      }).toList();
+
+      emit(ProfileLoaded(currentProfile.copyWith(pillars: updatedPillars)));
     }
   }
 

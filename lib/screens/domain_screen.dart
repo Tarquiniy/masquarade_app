@@ -444,11 +444,11 @@ class _DomainScreenState extends State<DomainScreen> {
                 const SizedBox(width: 15),
                 _buildStatItem(
                   icon: Icons.auto_awesome,
-                  color: profile.totalInfluence > 0
+                  color: domain.totalInfluence > 0
                       ? Colors.purple
                       : Colors.grey,
                   title: 'Влияние',
-                  value: profile.totalInfluence.toString(),
+                  value: domain.totalInfluence.toString(),
                 ),
               ],
             ),
@@ -469,20 +469,6 @@ class _DomainScreenState extends State<DomainScreen> {
                       : Colors.grey,
                   title: 'Нарушения',
                   value: domain.openViolationsCount.toString(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 15),
-            // ДОБАВЛЯЕМ СТРОКУ С ВЛИЯНИЕМ ИГРОКА
-            Row(
-              children: [
-                _buildStatItem(
-                  icon: Icons.person,
-                  color: profile.influence > 0
-                      ? Colors.deepPurple
-                      : Colors.grey,
-                  title: 'Ваше влияние',
-                  value: profile.influence.toString(),
                 ),
               ],
             ),
@@ -810,7 +796,7 @@ class _DomainScreenState extends State<DomainScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Общее влияние домена: ${profile.totalInfluence}',
+                  'Общее влияние домена: ${domain.totalInfluence}',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ],
@@ -829,15 +815,14 @@ class _DomainScreenState extends State<DomainScreen> {
 
                 if (domain == null) return;
 
-                final totalInfluence = profile.totalInfluence;
-                if (profile.influence < v.costToReveal) {
+                final totalInfluence = domain.totalInfluence;
+                if (domain.totalInfluence < v.costToReveal) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
                         'Недостаточно влияния для раскрытия. '
                         'Требуется: ${v.costToReveal}, '
-                        'Ваше влияние: ${profile.influence}, '
-                        'Общее влияние домена: $totalInfluence',
+                        'Влияние домена: $totalInfluence',
                       ),
                     ),
                   );
@@ -875,15 +860,14 @@ class _DomainScreenState extends State<DomainScreen> {
 
                 if (domain == null) return;
 
-                final totalInfluence = profile.totalInfluence;
-                if (profile.influence < v.costToClose) {
+                final totalInfluence = domain.totalInfluence;
+                if (domain.totalInfluence < v.costToClose) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
                         'Влияния недостаточно для закрытия. '
                         'Требуется: ${v.costToClose}, '
-                        'Ваше влияние: ${profile.influence}, '
-                        'Общее влияние домена: $totalInfluence',
+                        'Влияние домена: $totalInfluence',
                       ),
                     ),
                   );

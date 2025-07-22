@@ -63,11 +63,11 @@ class SupabaseService {
       disciplines: List<String>.from(profileRow['disciplines']),
       bloodPower: profileRow['blood_power'],
       hunger: 0,
-      influence: 0,
       domainId: null,
       role: 'player',
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
+      pillars: [],
     );
   }
 
@@ -330,11 +330,20 @@ class SupabaseService {
     }
   }
 
-  Future<void> updateHunger(String profileId, int hunger) async {
-    await client
-        .from('profiles')
-        .update({'hunger': hunger})
-        .eq('id', profileId);
+  Future<ProfileModel?> updateHunger(String profileId, int hunger) async {
+    try {
+      final response = await client
+          .from('profiles')
+          .update({'hunger': hunger})
+          .eq('id', profileId)
+          .select()
+          .single();
+
+      return ProfileModel.fromJson(response);
+    } catch (e) {
+      print('❌ Ошибка обновления голода: $e');
+      return null;
+    }
   }
 
   Future<void> revealViolation({
@@ -423,6 +432,19 @@ class SupabaseService {
     } catch (e) {
       debug?.call('❌ Ошибка в getCurrentProfile: $e');
       return null;
+    }
+  }
+
+  // Новый метод для обновления влияния домена
+  Future<void> updateDomainInfluence(int domainId, int newInfluence) async {
+    try {
+      await client
+          .from('domains')
+          .update({'admin_influence': newInfluence})
+          .eq('id', domainId);
+    } catch (e) {
+      print('❌ Ошибка обновления влияния домена: $e');
+      rethrow;
     }
   }
 }
