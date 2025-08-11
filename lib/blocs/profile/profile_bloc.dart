@@ -30,7 +30,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
   void _onClearDomain(ClearDomain event, Emitter<ProfileState> emit) {
     if (state is ProfileLoaded) {
       final currentProfile = (state as ProfileLoaded).profile;
-      emit(ProfileLoaded(currentProfile.copyWith(domainId: null)));
+      emit(ProfileLoaded(currentProfile.copyWith(domainIds: [])));
     }
   }
 

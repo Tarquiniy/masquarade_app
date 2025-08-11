@@ -32,6 +32,17 @@ self.addEventListener('fetch', (event) => {
       })
     );
   }
+  // Для изображений Supabase - обходим кеш
+  if (event.request.url.includes('supabase.co/storage')) {
+    event.respondWith(
+      fetch(event.request, {cache: 'no-store'})
+    );
+  } else {
+    event.respondWith(
+      caches.match(event.request)
+        .then(cached => cached || fetch(event.request))
+    );
+  }
 });
 
 self.addEventListener('activate', (event) => {

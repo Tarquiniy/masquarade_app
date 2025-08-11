@@ -12,7 +12,7 @@ class DomainBloc extends Bloc<DomainEvent, DomainState> {
     on<LoadDomains>(_onLoadDomains);
     on<RefreshDomains>(_onRefreshDomains);
     on<LoadUserDomain>(_onLoadUserDomain);
-    on<LoadCurrentUserDomain>(_onLoadCurrentUserDomain);
+    on<LoadUserDomains>(_onLoadUserDomains);
   }
 
   Future<void> _onLoadDomains(
@@ -23,17 +23,7 @@ class DomainBloc extends Bloc<DomainEvent, DomainState> {
     try {
       final domains = await repository.getDomains();
       emit(DomainsLoaded(domains));
-
-      final profile = await repository.getCurrentProfile();
-      if (profile != null) {
-        await sendDebugToTelegram('📌 LoadDomains — Profile ID: ${profile.id}');
-        for (final d in domains) {
-          final match = d.ownerId == profile.id ? '✅' : '❌';
-          await sendDebugToTelegram('🏰 ${d.name} → ${d.ownerId} $match');
-        }
-      } else {
-        await sendDebugToTelegram('❗️LoadDomains: Profile is null');
-      }
+      await sendDebugToTelegram('✅ LoadDomains — loaded ${domains.length} domains');
     } catch (e) {
       await sendDebugToTelegram('❌ LoadDomains error: $e');
       emit(DomainError('Не удалось загрузить домены'));
@@ -75,8 +65,10 @@ class DomainBloc extends Bloc<DomainEvent, DomainState> {
   ) async {
     emit(DomainLoading());
     try {
+      await sendDebugToTelegram('🔍 LoadUserDomain for user: ${event.userId}');
       final domains = await repository.getDomains();
-      final userDomain = domains.firstWhere(
+
+      DomainModel userDomain = domains.firstWhere(
         (d) => d.ownerId == event.userId,
         orElse: () {
           sendDebugToTelegram(
@@ -93,6 +85,7 @@ class DomainBloc extends Bloc<DomainEvent, DomainState> {
         },
       );
 
+      await sendDebugToTelegram('✅ Found domain: ${userDomain.name}');
       emit(UserDomainLoaded(userDomain));
     } catch (e) {
       await sendDebugToTelegram('❌ LoadUserDomain error: $e');
@@ -100,41 +93,25 @@ class DomainBloc extends Bloc<DomainEvent, DomainState> {
     }
   }
 
-  Future<void> _onLoadCurrentUserDomain(
-    LoadCurrentUserDomain event,
+  // Новый обработчик для загрузки всех доменов пользователя
+  Future<void> _onLoadUserDomains(
+    LoadUserDomains event,
     Emitter<DomainState> emit,
   ) async {
     emit(DomainLoading());
     try {
-      final profile = await repository.getCurrentProfile();
-      if (profile == null) {
-        await sendDebugToTelegram('❗️ LoadCurrentUserDomain: Profile is null!');
-        emit(DomainError('Профиль не найден'));
-        return;
-      }
-
       final domains = await repository.getDomains();
-      DomainModel userDomain = domains.firstWhere(
-        (d) => d.ownerId == profile.id,
-        orElse: () {
-          sendDebugToTelegram(
-            '⚠️ LoadCurrentUserDomain: домен не найден для ${profile.id}',
-          );
-          return DomainModel(
-            id: -1,
-            name: 'Нет домена',
-            latitude: 0,
-            longitude: 0,
-            boundaryPoints: [],
-            ownerId: '',
-          );
-        },
+      final userDomains = domains
+          .where((d) => d.ownerId == event.userId)
+          .toList();
+      
+      emit(UserDomainsLoaded(userDomains));
+      await sendDebugToTelegram(
+        '✅ LoadUserDomains — loaded ${userDomains.length} domains for user ${event.userId}'
       );
-
-      emit(CurrentUserDomainLoaded(userDomain));
     } catch (e) {
-      await sendDebugToTelegram('❌ LoadCurrentUserDomain error: $e');
-      emit(DomainError('Не удалось загрузить домен пользователя'));
+      await sendDebugToTelegram('❌ LoadUserDomains error: $e');
+      emit(DomainError('Не удалось загрузить домены пользователя'));
     }
   }
 }

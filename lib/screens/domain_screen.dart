@@ -16,7 +16,9 @@ import '../models/violation_model.dart';
 import '../utils/debug_telegram.dart';
 
 class DomainScreen extends StatefulWidget {
-  const DomainScreen({super.key});
+  final DomainModel domain;
+
+  const DomainScreen({super.key, required this.domain});
 
   @override
   State<DomainScreen> createState() => _DomainScreenState();
@@ -34,7 +36,6 @@ class _DomainScreenState extends State<DomainScreen> {
     setState(() => _isLoadingLocation = true);
 
     try {
-      // Проверка и запрос разрешений
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
@@ -46,14 +47,11 @@ class _DomainScreenState extends State<DomainScreen> {
         }
       }
 
-      // Получение текущей позиции
       if (await Geolocator.isLocationServiceEnabled()) {
         final pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.best,
         );
         setState(() => _position = pos);
-
-        // Центрирование карты на пользователе
         _mapController.move(LatLng(pos.latitude, pos.longitude), _currentZoom);
       }
     } catch (e) {
@@ -74,11 +72,13 @@ class _DomainScreenState extends State<DomainScreen> {
     super.initState();
     _centerOnUser();
     _checkNightReset();
+    
+    // Загружаем домен при инициализации
+    context.read<DomainBloc>().add(LoadUserDomain(widget.domain.id.toString()));
   }
 
   void _checkNightReset() {
     final now = DateTime.now();
-    // Сбрасываем счетчик нарушений в 20:00 каждый день
     if (_lastNightReset == null || now.day != _lastNightReset!.day) {
       if (now.hour >= 20) {
         setState(() {
@@ -89,46 +89,11 @@ class _DomainScreenState extends State<DomainScreen> {
     }
   }
 
-  Future<void> _handleDomainNeutralization(DomainModel domain) async {
-    if (domain.isNeutral) return;
-
-    if (_violationsCountTonight >= domain.securityLevel) {
-      final bloc = context.read<DomainBloc>();
-      final repository = bloc.repository;
-
-      try {
-        // Помечаем домен как нейтральный в базе данных
-        await repository.client
-            .from('domains')
-            .update({'isNeutral': true, 'ownerId': null})
-            .eq('id', domain.id);
-
-        // Обновляем состояние
-        bloc.add(
-          RefreshDomains(
-            (context.read<ProfileBloc>().state as ProfileLoaded).profile,
-          ),
-        );
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Домен "${domain.name}" стал нейтральным из-за нарушений',
-            ),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      } catch (e) {
-        print('Ошибка нейтрализации домена: $e');
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Мой Домен'),
+        title: Text(widget.domain.name),
         actions: [
           IconButton(
             icon: const Icon(Icons.my_location),
@@ -137,116 +102,37 @@ class _DomainScreenState extends State<DomainScreen> {
           ),
         ],
       ),
-      body: BlocBuilder<ProfileBloc, ProfileState>(
-        builder: (context, profileState) {
-          return BlocBuilder<DomainBloc, DomainState>(
-            builder: (context, domainState) {
-              // Показываем индикатор загрузки пока данные не готовы
-              if (profileState is! ProfileLoaded ||
-                  domainState is! DomainsLoaded) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              final profile = profileState.profile;
-              context.read<MasqueradeBloc>().add(LoadViolations());
-
-              return Stack(
-                children: [
-                  _buildDomainContent(context, profile, domainState.domains),
-                  if (_isLoadingLocation)
-                    const Center(child: CircularProgressIndicator()),
-                ],
-              );
-            },
-          );
+      body: BlocListener<DomainBloc, DomainState>(
+        listener: (context, state) {
+          if (state is DomainError) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(state.message)),
+            );
+          }
         },
+        child: _buildDomainContent(context),
       ),
     );
   }
 
-  Widget _buildDomainContent(
-    BuildContext context,
-    ProfileModel profile,
-    List<DomainModel> domains,
-  ) {
-    final userDomain = domains.firstWhere(
-      (d) => d.ownerId == profile.id,
-      orElse: () => DomainModel(
-        id: -1,
-        name: 'Нет домена',
-        ownerId: '',
-        latitude: 0,
-        longitude: 0,
-        boundaryPoints: [],
-      ),
-    );
-
-    // Если у пользователя нет домена
-    if (userDomain.id == -1) {
-      return Padding(
-        padding: const EdgeInsets.all(20),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.location_city, size: 80, color: Colors.grey),
-              const SizedBox(height: 20),
-              Text(
-                'У вас пока нет своего домена',
-                style: Theme.of(context).textTheme.headlineSmall,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 15),
-              const Text(
-                'Домен - это территория под вашим контролем, где вы можете охотиться с меньшим риском нарушить Маскарад.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16),
-              ),
-              const SizedBox(height: 30),
-              ElevatedButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Обратитесь к рассказчику, чтобы получить домен',
-                      ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.help),
-                label: const Text('Как получить домен?'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 16,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // Проверяем, не нужно ли нейтрализовать домен
-    _handleDomainNeutralization(userDomain);
-
-    final center = userDomain.boundaryPoints.isNotEmpty
-        ? userDomain.boundaryPoints.first
+  Widget _buildDomainContent(BuildContext context) {
+    final center = widget.domain.boundaryPoints.isNotEmpty
+        ? widget.domain.boundaryPoints.first
         : const LatLng(55.751244, 37.618423);
 
     return Column(
       children: [
-        // Карта домена
         SizedBox(
           height: MediaQuery.of(context).size.height * 0.4,
           child: BlocBuilder<MasqueradeBloc, MasqueradeState>(
             builder: (context, state) {
-              final violations = (state is ViolationsLoaded)
-                  ? state.violations
-                        .where((v) => v.domainId == userDomain.id)
-                        .toList()
-                  : <ViolationModel>[];
+              List<ViolationModel> violations = [];
+              
+              if (state is ViolationsLoaded) {
+                violations = state.violations
+                    .where((v) => v.domainId == widget.domain.id)
+                    .toList();
+              }
 
               return ClipRRect(
                 borderRadius: const BorderRadius.only(
@@ -262,7 +148,6 @@ class _DomainScreenState extends State<DomainScreen> {
                       flags: ~InteractiveFlag.doubleTapDragZoom,
                     ),
                     onMapReady: () {
-                      // Сохраняем начальный уровень зума
                       _currentZoom = 13.0;
                     },
                   ),
@@ -272,11 +157,11 @@ class _DomainScreenState extends State<DomainScreen> {
                           'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                       userAgentPackageName: 'com.masquerade.app',
                     ),
-                    if (userDomain.boundaryPoints.isNotEmpty)
+                    if (widget.domain.boundaryPoints.isNotEmpty)
                       PolygonLayer(
                         polygons: [
                           Polygon(
-                            points: userDomain.boundaryPoints,
+                            points: widget.domain.boundaryPoints,
                             color: Colors.blue.withOpacity(0.25),
                             borderColor: Colors.blue,
                             borderStrokeWidth: 3,
@@ -292,8 +177,7 @@ class _DomainScreenState extends State<DomainScreen> {
                                 width: 40,
                                 height: 40,
                                 child: GestureDetector(
-                                  onTap: () =>
-                                      _onViolationTap(context, v, userDomain),
+                                  onTap: () => _onViolationTap(context, v),
                                   child: const Icon(
                                     Icons.warning_amber_rounded,
                                     color: Colors.red,
@@ -325,18 +209,15 @@ class _DomainScreenState extends State<DomainScreen> {
             },
           ),
         ),
-
-        // Информация о домене
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Заголовок
                 Center(
                   child: Text(
-                    userDomain.name,
+                    widget.domain.name,
                     style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
@@ -345,9 +226,7 @@ class _DomainScreenState extends State<DomainScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-
-                // Статус домена
-                if (userDomain.isNeutral)
+                if (widget.domain.isNeutral)
                   Container(
                     padding: const EdgeInsets.symmetric(
                       vertical: 8,
@@ -374,42 +253,36 @@ class _DomainScreenState extends State<DomainScreen> {
                   ),
                 const SizedBox(height: 10),
                 const Divider(),
-
-                // Статистика домена
                 const Text(
                   'Статистика домена',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
-                _buildDomainStatCard(context, userDomain, profile),
+                _buildDomainStatCard(context),
                 const SizedBox(height: 20),
-
-                // Управление доменом
                 const Text(
                   'Управление доменом',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
-                _buildDomainControls(context, userDomain),
+                _buildDomainControls(context),
                 const SizedBox(height: 20),
-
-                // Нарушения маскарада
                 const Text(
                   'Нарушения маскарада',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Нарушений сегодня: $_violationsCountTonight/${userDomain.securityLevel}',
+                  'Нарушений сегодня: $_violationsCountTonight/${widget.domain.securityLevel}',
                   style: TextStyle(
-                    color: _violationsCountTonight >= userDomain.securityLevel
+                    color: _violationsCountTonight >= widget.domain.securityLevel
                         ? Colors.red
                         : Colors.green,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
                 const SizedBox(height: 12),
-                _buildViolationsList(context, profile, userDomain),
+                _buildViolationsList(context),
               ],
             ),
           ),
@@ -418,11 +291,7 @@ class _DomainScreenState extends State<DomainScreen> {
     );
   }
 
-  Widget _buildDomainStatCard(
-    BuildContext context,
-    DomainModel domain,
-    ProfileModel profile,
-  ) {
+  Widget _buildDomainStatCard(BuildContext context) {
     return Card(
       elevation: 3,
       shape: RoundedRectangleBorder(
@@ -437,18 +306,18 @@ class _DomainScreenState extends State<DomainScreen> {
               children: [
                 _buildStatItem(
                   icon: Icons.security,
-                  color: domain.securityLevel > 0 ? Colors.blue : Colors.grey,
+                  color: widget.domain.securityLevel > 0 ? Colors.blue : Colors.grey,
                   title: 'Защищенность',
-                  value: domain.securityLevel.toString(),
+                  value: widget.domain.securityLevel.toString(),
                 ),
                 const SizedBox(width: 15),
                 _buildStatItem(
                   icon: Icons.auto_awesome,
-                  color: domain.totalInfluence > 0
+                  color: widget.domain.totalInfluence > 0
                       ? Colors.purple
                       : Colors.grey,
                   title: 'Влияние',
-                  value: domain.totalInfluence.toString(),
+                  value: widget.domain.totalInfluence.toString(),
                 ),
               ],
             ),
@@ -457,18 +326,18 @@ class _DomainScreenState extends State<DomainScreen> {
               children: [
                 _buildStatItem(
                   icon: Icons.attach_money,
-                  color: domain.income > 0 ? Colors.green : Colors.grey,
+                  color: widget.domain.income > 0 ? Colors.green : Colors.grey,
                   title: 'Доход',
-                  value: '${domain.income}/день',
+                  value: '${widget.domain.income}/день',
                 ),
                 const SizedBox(width: 15),
                 _buildStatItem(
                   icon: Icons.warning,
-                  color: domain.openViolationsCount > 0
+                  color: widget.domain.openViolationsCount > 0
                       ? Colors.orange
                       : Colors.grey,
                   title: 'Нарушения',
-                  value: domain.openViolationsCount.toString(),
+                  value: widget.domain.openViolationsCount.toString(),
                 ),
               ],
             ),
@@ -523,7 +392,7 @@ class _DomainScreenState extends State<DomainScreen> {
     );
   }
 
-  Widget _buildDomainControls(BuildContext context, DomainModel domain) {
+  Widget _buildDomainControls(BuildContext context) {
     return Card(
       elevation: 3,
       shape: RoundedRectangleBorder(
@@ -535,7 +404,7 @@ class _DomainScreenState extends State<DomainScreen> {
         child: Column(
           children: [
             ElevatedButton.icon(
-              onPressed: () => _transferDomain(context, domain.id),
+              onPressed: () => _transferDomain(context, widget.domain.id),
               icon: const Icon(Icons.swap_horiz),
               label: const Text('Передать домен'),
               style: ElevatedButton.styleFrom(
@@ -557,11 +426,7 @@ class _DomainScreenState extends State<DomainScreen> {
     );
   }
 
-  Widget _buildViolationsList(
-    BuildContext context,
-    ProfileModel profile,
-    DomainModel domain,
-  ) {
+  Widget _buildViolationsList(BuildContext context) {
     return BlocBuilder<MasqueradeBloc, MasqueradeState>(
       builder: (context, state) {
         if (state is ViolationsLoading) {
@@ -579,7 +444,7 @@ class _DomainScreenState extends State<DomainScreen> {
 
         if (state is ViolationsLoaded) {
           final violationsInDomain = state.violations
-              .where((v) => v.domainId == domain.id)
+              .where((v) => v.domainId == widget.domain.id)
               .toList();
 
           if (violationsInDomain.isEmpty) {
@@ -625,7 +490,7 @@ class _DomainScreenState extends State<DomainScreen> {
             separatorBuilder: (context, index) => const SizedBox(height: 10),
             itemBuilder: (_, idx) {
               final v = violationsInDomain[idx];
-              return _buildViolationCard(context, v, profile);
+              return _buildViolationCard(context, v);
             },
           );
         }
@@ -635,11 +500,7 @@ class _DomainScreenState extends State<DomainScreen> {
     );
   }
 
-  Widget _buildViolationCard(
-    BuildContext context,
-    ViolationModel violation,
-    ProfileModel profile,
-  ) {
+  Widget _buildViolationCard(BuildContext context, ViolationModel violation) {
     Color statusColor;
     IconData statusIcon;
     String statusText;
@@ -670,15 +531,7 @@ class _DomainScreenState extends State<DomainScreen> {
       ),
       margin: EdgeInsets.zero,
       child: InkWell(
-        onTap: () {
-          if (violation.status == ViolationStatus.open ||
-              violation.canBeClosed ||
-              violation.canBeRevealed) {
-            _onViolationTap(context, violation, null);
-          } else {
-            _showViolationStatusInfo(context, violation);
-          }
-        },
+        onTap: () => _onViolationTap(context, violation),
         borderRadius: BorderRadius.circular(15),
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -735,20 +588,17 @@ class _DomainScreenState extends State<DomainScreen> {
     );
   }
 
-  void _onViolationTap(
-    BuildContext context,
-    ViolationModel v,
-    DomainModel? domain,
-  ) {
-    final profile =
-        (context.read<ProfileBloc>().state as ProfileLoaded).profile;
+  void _onViolationTap(BuildContext context, ViolationModel v) {
+    final profile = context.read<ProfileBloc>().state is ProfileLoaded
+        ? (context.read<ProfileBloc>().state as ProfileLoaded).profile
+        : null;
 
-    // Обновляем счетчик нарушений
-    if (domain != null && v.status == ViolationStatus.open) {
+    if (profile == null) return;
+
+    if (v.status == ViolationStatus.open) {
       setState(() {
         _violationsCountTonight++;
       });
-      _handleDomainNeutralization(domain);
     }
 
     showDialog(
@@ -783,46 +633,35 @@ class _DomainScreenState extends State<DomainScreen> {
                   ),
                 ],
               ),
-              if (domain != null) ...[
-                const SizedBox(height: 10),
-                Text(
-                  'Нарушений сегодня: $_violationsCountTonight/${domain.securityLevel}',
-                  style: TextStyle(
-                    color: _violationsCountTonight >= domain.securityLevel
-                        ? Colors.red
-                        : Colors.orange,
-                    fontWeight: FontWeight.bold,
-                  ),
+              const SizedBox(height: 10),
+              Text(
+                'Нарушений сегодня: $_violationsCountTonight/${widget.domain.securityLevel}',
+                style: TextStyle(
+                  color: _violationsCountTonight >= widget.domain.securityLevel
+                      ? Colors.red
+                      : Colors.orange,
+                  fontWeight: FontWeight.bold,
                 ),
-                const SizedBox(height: 10),
-                Text(
-                  'Общее влияние домена: ${domain.totalInfluence}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Общее влияние домена: ${widget.domain.totalInfluence}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ],
           ),
         ),
         actions: [
-          if (v.canBeRevealed && _isWithin24h(v) && !v.isRevealed)
+          if (v.canBeRevealed && !v.isRevealed)
             TextButton.icon(
               onPressed: () {
-                final domain = context.read<DomainBloc>().state is DomainsLoaded
-                    ? (context.read<DomainBloc>().state as DomainsLoaded)
-                          .domains
-                          .firstWhere((d) => d.id == v.domainId)
-                    : null;
-
-                if (domain == null) return;
-
-                final totalInfluence = domain.totalInfluence;
-                if (domain.totalInfluence < v.costToReveal) {
+                if (widget.domain.totalInfluence < v.costToReveal) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
                         'Недостаточно влияния для раскрытия. '
                         'Требуется: ${v.costToReveal}, '
-                        'Влияние домена: $totalInfluence',
+                        'Влияние домена: ${widget.domain.totalInfluence}',
                       ),
                     ),
                   );
@@ -840,34 +679,17 @@ class _DomainScreenState extends State<DomainScreen> {
               },
               icon: const Icon(Icons.visibility, size: 20),
               label: Text('Узнать нарушителя (${v.costToReveal} влияния)'),
-            )
-          else if (!v.canBeRevealed)
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: Text(
-                'Нарушитель уже раскрыт',
-                style: TextStyle(color: Colors.grey),
-              ),
             ),
           if (v.canBeClosed)
             TextButton.icon(
               onPressed: () {
-                final domain = context.read<DomainBloc>().state is DomainsLoaded
-                    ? (context.read<DomainBloc>().state as DomainsLoaded)
-                          .domains
-                          .firstWhere((d) => d.id == v.domainId)
-                    : null;
-
-                if (domain == null) return;
-
-                final totalInfluence = domain.totalInfluence;
-                if (domain.totalInfluence < v.costToClose) {
+                if (widget.domain.totalInfluence < v.costToClose) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
                         'Влияния недостаточно для закрытия. '
                         'Требуется: ${v.costToClose}, '
-                        'Влияние домена: $totalInfluence',
+                        'Влияние домена: ${widget.domain.totalInfluence}',
                       ),
                     ),
                   );
@@ -885,43 +707,7 @@ class _DomainScreenState extends State<DomainScreen> {
               },
               icon: const Icon(Icons.check_circle, size: 20),
               label: Text('Закрыть нарушение (${v.costToClose} влияния)'),
-            )
-          else
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: Text(
-                'Нарушение уже закрыто',
-                style: TextStyle(color: Colors.grey),
-              ),
             ),
-        ],
-      ),
-    );
-  }
-
-  void _showViolationStatusInfo(
-    BuildContext context,
-    ViolationModel violation,
-  ) {
-    String message;
-    if (violation.isClosed) {
-      message = 'Вы уже закрыли это нарушение';
-    } else if (violation.isRevealed) {
-      message = 'Вы уже узнали нарушителя';
-    } else {
-      message = 'Срок для действий по этому нарушению истёк';
-    }
-
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Нарушение Маскарада'),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
         ],
       ),
     );
@@ -978,11 +764,7 @@ class _DomainScreenState extends State<DomainScreen> {
                 domainId.toString(),
                 recipient.id,
               );
-              context.read<DomainBloc>().add(
-                RefreshDomains(
-                  (context.read<ProfileBloc>().state as ProfileLoaded).profile,
-                ),
-              );
+              context.read<DomainBloc>().add(LoadDomains());
             },
             child: const Text('Да'),
           ),
@@ -990,163 +772,8 @@ class _DomainScreenState extends State<DomainScreen> {
       ),
     );
   }
-
-  void _showHungerTransferDialog(BuildContext context, int maxHunger) {
-    int hungerToTransfer = 1;
-    showDialog(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setState) {
-          return AlertDialog(
-            title: const Text('Передача пунктов голода'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Доступно: $maxHunger пунктов',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    IconButton(
-                      onPressed: hungerToTransfer > 1
-                          ? () => setState(() => hungerToTransfer--)
-                          : null,
-                      icon: const Icon(Icons.remove),
-                    ),
-                    Container(
-                      width: 50,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        '$hungerToTransfer',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 18),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: hungerToTransfer < maxHunger
-                          ? () => setState(() => hungerToTransfer++)
-                          : null,
-                      icon: const Icon(Icons.add),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () =>
-                      _chooseHungerRecipient(context, hungerToTransfer),
-                  child: const Text('Выбрать получателя'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    minimumSize: const Size(double.infinity, 50),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  void _chooseHungerRecipient(
-    BuildContext context,
-    int hungerToTransfer,
-  ) async {
-    final players = await context.read<ProfileBloc>().getPlayers();
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Выберите игрока'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: players.length,
-            itemBuilder: (_, i) {
-              final p = players[i];
-              return ListTile(
-                title: Text(p.characterName),
-                subtitle: Text(p.clan),
-                onTap: () {
-                  Navigator.pop(context);
-                  _confirmHungerTransfer(context, p, hungerToTransfer);
-                },
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _confirmHungerTransfer(
-    BuildContext context,
-    ProfileModel recipient,
-    int amount,
-  ) {
-    final profile =
-        (context.read<ProfileBloc>().state as ProfileLoaded).profile;
-
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Подтверждение передачи'),
-        content: Text(
-          'Вы хотите передать $amount пунктов голода игроку ${recipient.characterName}?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Отмена'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                await context.read<DomainBloc>().repository.transferHunger(
-                  fromUserId: profile.id,
-                  toUserId: recipient.id,
-                  amount: amount,
-                );
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Успешно передано $amount пунктов голода'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-
-                // Обновляем профиль получателя
-                context.read<ProfileBloc>().add(
-                  UpdateProfile(
-                    recipient.copyWith(hunger: recipient.hunger + amount),
-                  ),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Ошибка передачи: $e'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text('Передать'),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
-// Вспомогательные функции
 String _formatTimeAgo(DateTime date) {
   final now = DateTime.now();
   final difference = now.difference(date);
@@ -1161,9 +788,4 @@ String _formatTimeAgo(DateTime date) {
 
 String _formatDateTime(DateTime date) {
   return '${date.day}.${date.month}.${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
-}
-
-bool _isWithin24h(ViolationModel v) {
-  final now = DateTime.now();
-  return now.difference(v.createdAt).inHours <= 24;
 }

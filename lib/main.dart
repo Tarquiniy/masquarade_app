@@ -35,7 +35,7 @@ void main() async {
   final repository = SupabaseRepository(service);
 
   final user = client.auth.currentUser;
-  print('🚀 App started. Current user: ${user?.id ?? "none"}');
+  sendDebugToTelegram('🚀 App started. Current user: ${user?.id ?? "none"}');
 
   runApp(MyApp(repository: repository));
 }
@@ -104,11 +104,11 @@ class AppEntry extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocBuilder<AuthBloc, AuthState>(
       builder: (context, state) {
-        print('🔄 AuthState: $state');
+        sendDebugToTelegram('🔄 AuthState: $state');
 
         if (state is Authenticated) {
           final profile = state.profile;
-          print('🔑 Authenticated: ${profile.characterName}');
+          sendDebugToTelegram('🔑 Authenticated: ${profile.characterName}');
 
           context.read<ProfileBloc>().add(SetProfile(profile));
 

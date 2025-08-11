@@ -9,6 +9,8 @@ class CarpetChatMessage {
   final Timestamp timestamp;
   final String? mediaType;
   final String senderRole;
+  final int? duration;
+  final String? fileName;
 
   CarpetChatMessage({
     required this.id,
@@ -19,6 +21,8 @@ class CarpetChatMessage {
     required this.timestamp,
     this.mediaType,
     required this.senderRole,
+    this.duration,
+    this.fileName,
   });
 
   factory CarpetChatMessage.fromFirestore(DocumentSnapshot doc) {
@@ -26,12 +30,14 @@ class CarpetChatMessage {
     return CarpetChatMessage(
       id: doc.id,
       senderId: data['senderId'] ?? '',
-      senderName: data['senderName'] ?? 'Неизвестный', // Исправлено
+      senderName: data['senderName'] ?? 'Неизвестный',
       text: data['text'],
       mediaUrl: data['mediaUrl'],
       timestamp: data['timestamp'] ?? Timestamp.now(),
       mediaType: data['mediaType'],
       senderRole: data['senderRole'] ?? 'user',
+      duration: data['duration'] != null ? data['duration'] as int? : null,
+      fileName: data['fileName'],
     );
   }
 }

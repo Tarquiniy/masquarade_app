@@ -1,66 +1,106 @@
+import 'dart:async';
+import 'dart:convert' as ui;
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:masquarade_app/models/carpet_chat_message_model.dart';
-import 'package:masquarade_app/models/profile_model.dart';
-import 'package:masquarade_app/services/firebase_chat_service.dart';
-import 'package:masquarade_app/services/media_service.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:photo_view/photo_view.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:masquarade_app/utils/debug_telegram.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, consolidateHttpClientResponseBytes;
+
+import '../models/profile_model.dart';
+import '../models/carpet_chat_message_model.dart';
+import '../services/firebase_chat_service.dart' hide MediaService;
+import '../services/media_service.dart';
+import '../utils/debug_telegram.dart';
+import '../services/media_service.dart' as custom_media; // Уточненный импорт
 
 class CarpetChatScreen extends StatefulWidget {
   final ProfileModel profile;
   const CarpetChatScreen({super.key, required this.profile});
 
   @override
-  State<CarpetChatScreen> createState() => _Carpet_chat_screenState();
+  State<CarpetChatScreen> createState() => _CarpetChatScreenState();
 }
 
-class _Carpet_chat_screenState extends State<CarpetChatScreen> {
+class _CarpetChatScreenState extends State<CarpetChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final FirebaseChatService _chatService = FirebaseChatService();
   late Stream<QuerySnapshot> _messagesStream;
   final ImagePicker _picker = ImagePicker();
   late MediaService _mediaService;
   bool _isUploading = false;
-  late AudioPlayer _audioPlayer;
-  bool _isPlaying = false;
-  String? _currentPlayingUrl;
+  final Map<String, AudioPlayer> _audioPlayers = {};
+  final Map<String, StreamSubscription<Duration>> _positionSubscriptions = {};
+  final ScrollController _scrollController = ScrollController();
+  String _errorMessage = '';
 
   @override
   void initState() {
     super.initState();
     _initChat();
-    _mediaService = MediaService(Supabase.instance.client);
-    _audioPlayer = AudioPlayer();
+    _mediaService = MediaService();
+    sendDebugToTelegram('🚀 CarpetChatScreen инициализирован');
   }
 
-  void _initChat() {
-    try {
-      _messagesStream = _chatService.getMessagesStream();
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка инициализации чата: $e');
-    }
+  @override
+  void dispose() {
+    _audioPlayers.forEach((_, player) => player.dispose());
+    _audioPlayers.clear();
+    _positionSubscriptions.forEach((_, sub) => sub.cancel());
+    super.dispose();
   }
+
+  Future<void> _initChat() async {
+  try {
+    sendDebugToTelegram('🔄 Starting chat service...');
+    
+    _messagesStream = _chatService.getMessagesStream();
+    
+    _messagesStream.listen(
+      (snapshot) {
+        sendDebugToTelegram('📥 Received ${snapshot.docs.length} messages');
+        if (_scrollController.hasClients) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _scrollController.animateTo(
+              0,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          });
+        }
+      },
+      onError: (error) async {
+        final errorMsg = '❌ Stream error: $error';
+        await sendDebugToTelegram(errorMsg);
+        setState(() => _errorMessage = errorMsg);
+      }
+    );
+  } catch (e, stackTrace) {
+    final errorMsg = '❌ Chat init error: $e\n$stackTrace';
+    await sendDebugToTelegram(errorMsg);
+    setState(() => _errorMessage = errorMsg);
+  }
+}
 
   void _sendMessage() {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
     try {
+      sendDebugToTelegram('✉️ Отправка сообщения: "$text"');
       _chatService.sendMessage(
         senderId: widget.profile.id,
         text: text,
       );
       _messageController.clear();
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка отправки сообщения: $e');
+    } catch (e, stackTrace) {
+      final errorMsg = '❌ Ошибка отправки: $e\n$stackTrace';
+      sendDebugToTelegram(errorMsg);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Ошибка отправки сообщения'),
@@ -71,40 +111,39 @@ class _Carpet_chat_screenState extends State<CarpetChatScreen> {
   }
 
   Future<void> _pickAndSendImage() async {
+    setState(() => _isUploading = true);
+
     try {
       final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
       if (image == null) return;
 
-      setState(() => _isUploading = true);
-
       final bytes = await image.readAsBytes();
-      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${widget.profile.id}.jpg';
-
       final mediaUrl = await _mediaService.uploadMedia(
         bytes,
-        fileName,
-        fileType: 'image'
+        image.name,
+        fileType: 'image',
       );
 
       await _chatService.sendMessage(
         senderId: widget.profile.id,
-        text: null,
         mediaUrl: mediaUrl,
         mediaType: 'image',
+        fileName: image.name,
       );
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка загрузки изображения: $e');
+    } catch (e, stackTrace) {
+      final errorMsg = '❌ Ошибка загрузки изображения: $e\n$stackTrace';
+      sendDebugToTelegram(errorMsg);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Ошибка загрузки: $e')),
       );
     } finally {
-      if (mounted) {
-        setState(() => _isUploading = false);
-      }
+      setState(() => _isUploading = false);
     }
   }
 
   Future<void> _pickAndSendAudio() async {
+    setState(() => _isUploading = true);
+
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.audio,
@@ -113,70 +152,72 @@ class _Carpet_chat_screenState extends State<CarpetChatScreen> {
 
       if (result == null || result.files.isEmpty) return;
 
-      setState(() => _isUploading = true);
-
-      Uint8List bytes;
-      String fileName = result.files.first.name;
-
-      if (kIsWeb) {
-        bytes = result.files.first.bytes!;
-      } else {
-        final file = File(result.files.first.path!);
-        bytes = await file.readAsBytes();
-      }
+      final file = result.files.first;
+      Uint8List bytes = kIsWeb ? file.bytes! : await File(file.path!).readAsBytes();
 
       final mediaUrl = await _mediaService.uploadMedia(
         bytes,
-        fileName,
-        fileType: 'audio'
+        file.name,
+        fileType: 'audio',
       );
+
+      int durationInSeconds = await _getAudioDuration(bytes, mediaUrl);
 
       await _chatService.sendMessage(
         senderId: widget.profile.id,
-        text: null,
         mediaUrl: mediaUrl,
         mediaType: 'audio',
+        duration: durationInSeconds,
+        fileName: file.name,
       );
-    } catch (e, stack) {
-      sendDebugToTelegram('❌ Ошибка загрузки аудио: $e\n$stack');
+    } catch (e, stackTrace) {
+      final errorMsg = '❌ Ошибка загрузки аудио: $e\n$stackTrace';
+      sendDebugToTelegram(errorMsg);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Ошибка загрузки аудио: $e')),
       );
     } finally {
-      if (mounted) {
-        setState(() => _isUploading = false);
-      }
+      setState(() => _isUploading = false);
     }
   }
 
-  Future<void> _toggleAudioPlayback(String url) async {
-    if (_isPlaying && _currentPlayingUrl == url) {
-      await _audioPlayer.pause();
-      setState(() {
-        _isPlaying = false;
-      });
+  Future<int> _getAudioDuration(Uint8List bytes, String url) async {
+  final tempPlayer = AudioPlayer();
+  try {
+    // Для Web используем URL, для других платформ - бинарные данные
+    if (kIsWeb) {
+      await tempPlayer.setSourceUrl(url);
     } else {
-      if (_currentPlayingUrl != null) {
-        await _audioPlayer.stop();
+      await tempPlayer.setSourceBytes(bytes);
+    }
+    
+    final duration = await tempPlayer.getDuration();
+    return duration?.inSeconds ?? 0;
+  } catch (e) {
+    return 0;
+  } finally {
+    tempPlayer.dispose();
+  }
+}
+
+  Future<void> _toggleAudioPlayback(String url) async {
+    if (!_audioPlayers.containsKey(url)) {
+      _audioPlayers[url] = AudioPlayer();
+    }
+
+    final player = _audioPlayers[url]!;
+
+    if (player.state == PlayerState.playing) {
+      await player.pause();
+    } else {
+      for (final otherPlayer in _audioPlayers.values) {
+        if (otherPlayer.state == PlayerState.playing) {
+          await otherPlayer.pause();
+        }
       }
 
       try {
-        await _audioPlayer.play(UrlSource(url));
-        setState(() {
-          _isPlaying = true;
-          _currentPlayingUrl = url;
-        });
-
-        _audioPlayer.onPlayerStateChanged.listen((state) {
-          if (state == PlayerState.completed) {
-            if (mounted) {
-              setState(() {
-                _isPlaying = false;
-                _currentPlayingUrl = null;
-              });
-            }
-          }
-        });
+        await player.play(UrlSource(url));
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Ошибка воспроизведения аудио')),
@@ -185,14 +226,33 @@ class _Carpet_chat_screenState extends State<CarpetChatScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _audioPlayer.dispose();
-    super.dispose();
+  void _confirmDeleteMessage(String messageId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить сообщение?'),
+        content: const Text('Это действие нельзя отменить'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _chatService.deleteMessage(messageId);
+            },
+            child: const Text('Удалить', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final bool isAdmin = widget.profile.isAdmin || widget.profile.isStoryteller;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('КОВРОЧАТ'),
@@ -206,10 +266,40 @@ class _Carpet_chat_screenState extends State<CarpetChatScreen> {
               stream: _messagesStream,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
+                  final error = snapshot.error;
+                  final stack = StackTrace.current;
+                  final errorMsg = '❌ StreamBuilder error: $error\n$stack';
+                  sendDebugToTelegram(errorMsg);
+                  
                   return Center(
-                    child: Text(
-                      'Ошибка загрузки чата',
-                      style: TextStyle(color: Colors.red[300]),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error, color: Colors.red, size: 48),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Ошибка загрузки чата',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Text(
+                            errorMsg,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.grey),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: _initChat,
+                          child: const Text('Повторить попытку'),
+                        ),
+                      ],
                     ),
                   );
                 }
@@ -239,107 +329,81 @@ class _Carpet_chat_screenState extends State<CarpetChatScreen> {
                 }
 
                 return ListView.builder(
+                  controller: _scrollController,
                   reverse: true,
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final doc = messages[index];
                     final message = CarpetChatMessage.fromFirestore(doc);
+                    if (message.mediaUrl != null) {
+                      print('Media URL: ${message.mediaUrl}');
+                      sendDebugToTelegram('Media URL: ${message.mediaUrl}');
+                    }
+                    
                     return _buildMessageBubble(message);
                   },
                 );
               },
             ),
           ),
-          _buildMessageInput(),
+          if (_errorMessage.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.all(8),
+              color: Colors.red[900],
+              child: Text(
+                _errorMessage,
+                style: const TextStyle(color: Colors.white),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          _buildMessageInput(isAdmin), // Исправленный вызов
         ],
       ),
     );
   }
 
   Widget _buildMessageBubble(CarpetChatMessage message) {
-  // Всегда показываем имя отправителя для администраторов
-  final bool isAdminViewer = widget.profile.isAdmin || widget.profile.isStoryteller;
-
+  final bool isAdmin = widget.profile.isAdmin || widget.profile.isStoryteller;
   final bool hasMedia = message.mediaUrl != null && message.mediaUrl!.isNotEmpty;
   final bool isAudio = message.mediaType == 'audio';
 
-  return Align(
-    alignment: Alignment.centerLeft,
-    child: ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: MediaQuery.of(context).size.width * 0.8,
-      ),
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: const Color(0xFF2a0000).withOpacity(0.8),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.3),
-              blurRadius: 6,
-              offset: const Offset(0, 3),
-            ),
-          ],
+  return GestureDetector(
+    onLongPress: isAdmin
+        ? () => _confirmDeleteMessage(message.id)
+        : null,
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.8,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Показываем имя для администраторов
-            if (isAdminViewer)
-              Text(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF2a0000).withOpacity(0.8),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (isAdmin) Text(
                 message.senderName,
                 style: TextStyle(
                   color: Colors.amber[200],
                   fontWeight: FontWeight.bold,
-                  fontSize: 14,
                 ),
               ),
-            
-            if (message.text != null)
-              Padding(
+              if (message.text != null) Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 8),
                 child: Text(
                   message.text!,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 16,
-                    height: 1.4,
-                  ),
+                  style: const TextStyle(fontSize: 16),
                 ),
               ),
-
-              if (hasMedia && !isAudio)
-                GestureDetector(
-                  onTap: () => _showFullScreenImage(context, message.mediaUrl!),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      constraints: const BoxConstraints(
-                        maxWidth: 300,
-                        maxHeight: 300,
-                      ),
-                      child: CachedNetworkImage(
-                        imageUrl: message.mediaUrl!,
-                        placeholder: (context, url) => Container(
-                          color: Colors.grey[900],
-                          child: const Center(
-                            child: CircularProgressIndicator(
-                              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFd4af37)),
-                            ),
-                          ),
-                        ),
-                        errorWidget: (context, url, error) => const Icon(Icons.error, color: Colors.red),
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
-                ),
-
-              if (hasMedia && isAudio)
-                _buildAudioPlayer(message.mediaUrl!),
-
+              if (hasMedia && !isAudio) _buildImageMessage(message.mediaUrl!),
+              if (hasMedia && isAudio) _buildAudioPlayer(message.mediaUrl!, message.duration),
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
@@ -354,73 +418,107 @@ class _Carpet_chat_screenState extends State<CarpetChatScreen> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
-  Widget _buildAudioPlayer(String url) {
-    final bool isPlaying = _isPlaying && _currentPlayingUrl == url;
-    final double audioProgress = 0.0;
-
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+Widget _buildImageMessage(String url) {
+  return GestureDetector(
+    onTap: () {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => FullScreenImageView(imageUrl: url),
+        ),
+      );
+    },
+    child: Container(
+      width: 250,
+      height: 250,
       decoration: BoxDecoration(
-        color: const Color(0xFF3a0000),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
+        image: DecorationImage(
+          image: NetworkImage(url),
+          fit: BoxFit.cover,
+        ),
       ),
-      child: Row(
+      child: Stack(
         children: [
-          IconButton(
-            icon: Icon(
-              isPlaying ? Icons.pause : Icons.play_arrow,
-              color: Colors.amber[200],
+          Positioned.fill(
+            child: Image.network(
+              url,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.error, color: Colors.red, size: 48),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Ошибка загрузки',
+                        style: TextStyle(color: Colors.red[700]),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
-            onPressed: () => _toggleAudioPlayback(url),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Аудиосообщение',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                if (isPlaying)
-                  LinearProgressIndicator(
-                    value: audioProgress,
-                    backgroundColor: Colors.grey[800],
-                    color: const Color(0xFFd4af37),
-                  ),
-              ],
-            ),
+          const Positioned(
+            bottom: 8,
+            right: 8,
+            child: Icon(Icons.zoom_in, color: Colors.white70, size: 24),
           ),
         ],
       ),
-    );
+    ),
+  );
+}
+
+  Widget _buildAudioPlayer(String url, int? durationSec) {
+  final player = _audioPlayers[url] ?? AudioPlayer();
+  if (!_audioPlayers.containsKey(url)) {
+    _audioPlayers[url] = player;
   }
 
-  Widget _buildMessageInput() {
+  return AudioPlayerWidget(
+    player: player,
+    url: url,
+    duration: durationSec != null ? Duration(seconds: durationSec) : null,
+    stopOtherPlayers: _stopOtherPlayers,
+  );
+}
+
+// Добавляем метод для остановки других плееров
+void _stopOtherPlayers(AudioPlayer currentPlayer) {
+  for (var entry in _audioPlayers.entries) {
+    final player = entry.value;
+    if (player != currentPlayer && player.state == PlayerState.playing) {
+      player.pause();
+    }
+  }
+}
+
+  Widget _buildMessageInput(bool isAdmin) {
     return Padding(
       padding: const EdgeInsets.all(12.0),
       child: Row(
         children: [
-          IconButton(
-            icon: _isUploading
-                ? const CircularProgressIndicator(color: Colors.amber)
-                : const Icon(Icons.image, color: Colors.amber),
-            onPressed: _isUploading ? null : _pickAndSendImage,
-            tooltip: 'Добавить изображение',
-          ),
-          IconButton(
-            icon: const Icon(Icons.mic, color: Colors.amber),
-            onPressed: _isUploading ? null : _pickAndSendAudio,
-            tooltip: 'Добавить аудио',
-          ),
+          if (isAdmin) ...[
+            IconButton(
+              icon: _isUploading
+                  ? const CircularProgressIndicator(color: Colors.amber)
+                  : const Icon(Icons.image, color: Colors.amber),
+              onPressed: _isUploading ? null : _pickAndSendImage,
+              tooltip: 'Добавить изображение',
+            ),
+            IconButton(
+              icon: const Icon(Icons.mic, color: Colors.amber),
+              onPressed: _isUploading ? null : _pickAndSendAudio,
+              tooltip: 'Добавить аудио',
+            ),
+          ],
           Expanded(
             child: Container(
               decoration: BoxDecoration(
@@ -441,6 +539,7 @@ class _Carpet_chat_screenState extends State<CarpetChatScreen> {
                 ),
                 maxLines: 3,
                 minLines: 1,
+                onSubmitted: (_) => _sendMessage(),
               ),
             ),
           ),
@@ -498,5 +597,322 @@ class _Carpet_chat_screenState extends State<CarpetChatScreen> {
 
   String _formatTime(DateTime time) {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+}
+
+class FullScreenImageView extends StatefulWidget {
+  final String imageUrl;
+
+  const FullScreenImageView({super.key, required this.imageUrl});
+
+  @override
+  State<FullScreenImageView> createState() => _FullScreenImageViewState();
+}
+
+class _FullScreenImageViewState extends State<FullScreenImageView> {
+  final PhotoViewController controller = PhotoViewController();
+  double _scale = 1.0;
+  double _offsetY = 0.0;
+  double _opacity = 1.0;
+  bool _isClosing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        onVerticalDragStart: (details) {
+          if (_scale <= 1.0) {
+            setState(() => _isClosing = true);
+          }
+        },
+        onVerticalDragUpdate: (details) {
+          if (_isClosing) {
+            setState(() {
+              _offsetY = details.primaryDelta!;
+              _opacity = 1.0 - (_offsetY.abs() / 300).clamp(0.0, 1.0);
+            });
+          }
+        },
+        onVerticalDragEnd: (details) {
+          if (_isClosing && _offsetY.abs() > 100) {
+            Navigator.pop(context);
+          } else {
+            setState(() {
+              _isClosing = false;
+              _offsetY = 0.0;
+              _opacity = 1.0;
+            });
+          }
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          color: Colors.black.withOpacity(_opacity),
+          transform: Matrix4.translationValues(0, _offsetY, 0),
+          child: Stack(
+            children: [
+              PhotoView(
+                imageProvider: NetworkImage(widget.imageUrl),
+                controller: controller,
+                minScale: PhotoViewComputedScale.contained,
+                maxScale: 5.0,
+                backgroundDecoration: const BoxDecoration(color: Colors.transparent),
+                onTapUp: (context, details, controllerValue) {
+                  if (_scale <= 1.0) {
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+              if (!_isClosing)
+                Positioned(
+                  top: 40,
+                  right: 20,
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AudioPlayerWidget extends StatefulWidget {
+  final AudioPlayer player;
+  final String url;
+  final Duration? duration;
+  final Function(AudioPlayer) stopOtherPlayers;
+
+  const AudioPlayerWidget({
+    super.key,
+    required this.player,
+    required this.url,
+    this.duration,
+    required this.stopOtherPlayers,
+  });
+
+  @override
+  State<AudioPlayerWidget> createState() => _AudioPlayerWidgetState();
+}
+
+
+class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
+  PlayerState _playerState = PlayerState.stopped;
+  Duration _position = Duration.zero;
+  Duration? _duration;
+  double _playbackSpeed = 1.0;
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _duration = widget.duration;
+    _initPlayer();
+  }
+
+  Future<void> _initPlayer() async {
+    setState(() => _isLoading = true);
+    try {
+      // Подписки на события
+      widget.player.onPlayerStateChanged.listen((state) {
+        if (mounted) setState(() => _playerState = state);
+      });
+
+      widget.player.onPositionChanged.listen((pos) {
+        if (mounted) setState(() => _position = pos);
+      });
+
+      widget.player.onDurationChanged.listen((dur) {
+        if (mounted) setState(() => _duration = dur);
+      });
+
+      // Загрузка аудио
+      await widget.player.setSource(UrlSource(widget.url));
+
+      // Получаем длительность, если она неизвестна
+      if (_duration == null) {
+        final duration = await widget.player.getDuration();
+        if (duration != null && mounted) {
+          setState(() => _duration = duration);
+        }
+      }
+      
+      if (mounted) setState(() => _isLoading = false);
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+      print('Ошибка инициализации плеера: $e');
+    }
+  }
+
+ @override
+  Widget build(BuildContext context) {
+    final duration = _duration ?? const Duration(seconds: 1);
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF3a0000),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Компактная строка с информацией и кнопкой воспроизведения
+          Row(
+            children: [
+              // Кнопка воспроизведения/паузы
+              _buildPlayPauseButton(),
+              
+              const SizedBox(width: 12),
+              
+              // Информация о треке
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Аудиосообщение',
+                      style: TextStyle(
+                        color: Colors.amber[200],
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    Text(
+                      '${_formatDuration(_position)} / ${_formatDuration(duration)}',
+                      style: TextStyle(
+                        color: Colors.grey[400],
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // Кнопка скорости воспроизведения
+              PopupMenuButton<double>(
+                icon: Text(
+                  '${_playbackSpeed}x',
+                  style: TextStyle(color: Colors.amber[200], fontSize: 14),
+                ),
+                itemBuilder: (context) => [0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((speed) {
+                  return PopupMenuItem<double>(
+                    value: speed,
+                    child: Text('${speed}x'),
+                  );
+                }).toList(),
+                onSelected: (speed) async {
+                  await widget.player.setPlaybackRate(speed);
+                  setState(() => _playbackSpeed = speed);
+                },
+              ),
+            ],
+          ),
+          
+          // Прогресс-бар
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: Colors.amber[200],
+              inactiveTrackColor: Colors.grey[700],
+              thumbColor: Colors.amber[200],
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+            ),
+            child: Slider(
+              value: _position.inMilliseconds.toDouble(),
+              min: 0,
+              max: duration.inMilliseconds.toDouble(),
+              onChangeEnd: (value) async {
+                await widget.player.seek(Duration(milliseconds: value.toInt()));
+              },
+              onChanged: (value) {
+                setState(() {
+                  _position = Duration(milliseconds: value.toInt());
+                });
+              },
+            ),
+          ),
+          
+          // Кнопки перемотки
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                icon: Icon(Icons.replay_10, size: 24, color: Colors.grey[400]),
+                onPressed: () => _seek(-10),
+                tooltip: 'Назад 10 сек',
+              ),
+              const SizedBox(width: 24),
+              IconButton(
+                icon: Icon(Icons.forward_10, size: 24, color: Colors.grey[400]),
+                onPressed: () => _seek(10),
+                tooltip: 'Вперед 10 сек',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlayPauseButton() {
+    if (_isLoading) {
+      return const SizedBox(
+        width: 32,
+        height: 32,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+    
+    return IconButton(
+      icon: Icon(
+        _playerState == PlayerState.playing
+            ? Icons.pause
+            : Icons.play_arrow,
+        size: 32,
+        color: Colors.amber[200],
+      ),
+      onPressed: _togglePlay,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+    );
+  }
+
+  Future<void> _togglePlay() async {
+    if (_playerState == PlayerState.playing) {
+      await widget.player.pause();
+    } else {
+      // Остановить все другие плееры через колбэк
+      widget.stopOtherPlayers(widget.player);
+      
+      // Запустить текущий
+      await widget.player.resume(); // Используем resume вместо play
+    }
+  }
+
+
+  Future<void> _seek(int seconds) async {
+    final duration = _duration ?? Duration.zero;
+    final newPosition = _position + Duration(seconds: seconds);
+    final clampedPosition = newPosition < Duration.zero
+        ? Duration.zero
+        : (newPosition > duration ? duration : newPosition);
+    
+    await widget.player.seek(clampedPosition);
+  }
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
   }
 }

@@ -43,3 +43,12 @@ class CurrentUserDomainLoaded extends DomainState {
   @override
   List<Object?> get props => [domain];
 }
+
+// Новое состояние для доменов пользователя
+class UserDomainsLoaded extends DomainState {
+  final List<DomainModel> domains;
+  const UserDomainsLoaded(this.domains);
+
+  @override
+  List<Object?> get props => [domains];
+}

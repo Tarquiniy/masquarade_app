@@ -66,7 +66,7 @@ class SupabaseService {
       disciplines: List<String>.from(profileRow['disciplines']),
       bloodPower: profileRow['blood_power'],
       hunger: 0,
-      domainId: null,
+      domainIds: [],
       role: 'player',
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
@@ -189,7 +189,7 @@ class SupabaseService {
     // Обновляем профиль нового владельца
     await client
         .from('profiles')
-        .update({'domain_id': int.parse(domainId)})
+        .update({'domain_ids': [int.parse(domainId)]}) // Изменено
         .eq('id', newOwnerId);
 
     // Обновляем профиль старого владельца
@@ -203,7 +203,7 @@ class SupabaseService {
     if (oldOwner != null) {
       await client
           .from('profiles')
-          .update({'domain_id': null})
+          .update({'domain_ids': []}) // Изменено
           .eq('id', oldOwner);
     }
   }
@@ -334,20 +334,23 @@ class SupabaseService {
   }
 
   Future<ProfileModel?> updateHunger(String profileId, int hunger) async {
-    try {
-      final response = await client
-          .from('profiles')
-          .update({'hunger': hunger})
-          .eq('id', profileId)
-          .select()
-          .single();
+  try {
+    // Гарантируем, что голод не может быть отрицательным
+    final clampedHunger = hunger < 0 ? 0 : hunger;
 
-      return ProfileModel.fromJson(response);
-    } catch (e) {
-      print('❌ Ошибка обновления голода: $e');
-      return null;
-    }
+    final response = await client
+        .from('profiles')
+        .update({'hunger': clampedHunger})
+        .eq('id', profileId)
+        .select()
+        .single();
+
+    return ProfileModel.fromJson(response);
+  } catch (e) {
+    print('❌ Ошибка обновления голода: $e');
+    return null;
   }
+}
 
   Future<void> revealViolation({
     required String id,
@@ -468,6 +471,20 @@ class SupabaseService {
         .getPublicUrl(fileName);
     } catch (e) {
       throw Exception('Ошибка загрузки: $e');
+    }
+  }
+
+  Future<List<DomainModel>> getUserDomains(String userId) async {
+    try {
+      final data = await client
+          .from('domains')
+          .select()
+          .eq('owner_id', userId);
+      
+      return (data as List).map((e) => DomainModel.fromJson(e)).toList();
+    } catch (e) {
+      sendDebugToTelegram('Ошибка получения доменов пользователя: $e');
+      return [];
     }
   }
 }

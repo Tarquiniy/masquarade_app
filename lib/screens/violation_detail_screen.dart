@@ -18,7 +18,7 @@ class ViolationDetailScreen extends StatelessWidget {
     }
 
     final profile = profileState.profile;
-    final isOwner = profile.domainId == violation.domainId;
+        final isOwner = profile.domainIds.contains(violation.domainId);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Детали нарушения')),

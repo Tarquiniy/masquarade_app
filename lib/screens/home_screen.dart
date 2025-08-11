@@ -6,6 +6,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:masquarade_app/blocs/profile/profile_bloc.dart';
 import 'package:masquarade_app/models/domain_model.dart';
 import 'package:masquarade_app/models/profile_model.dart';
+import 'package:masquarade_app/screens/domains_screen.dart';
 
 import '../blocs/domain/domain_bloc.dart';
 import '../blocs/domain/domain_event.dart';
@@ -57,7 +58,6 @@ class _HomeScreenContent extends StatefulWidget {
 class _HomeScreenContentState extends State<_HomeScreenContent> {
   Position? _position;
   final MapController _mapController = MapController();
-  DomainModel? _currentUserDomain;
   bool _isLoadingLocation = false;
 
   @override
@@ -65,10 +65,10 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
     super.initState();
     _initLocation();
     context.read<MasqueradeBloc>().add(LoadViolations());
-    _loadUserDomain();
+    context.read<DomainBloc>().add(RefreshDomains(widget.profile));
   }
 
-  Future<void> _initLocation() async {
+   Future<void> _initLocation() async {
     setState(() => _isLoadingLocation = true);
 
     final permission = await Geolocator.checkPermission();
@@ -87,18 +87,25 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
           _mapController.move(LatLng(pos.latitude, pos.longitude), 15);
         });
       } catch (e) {
-        print("Ошибка получения местоположения: $e");
+        sendDebugToTelegram("Ошибка получения местоположения: $e");
       }
     }
 
     setState(() => _isLoadingLocation = false);
   }
 
-  void _loadUserDomain() {
-    context.read<DomainBloc>().add(LoadCurrentUserDomain());
-  }
-
   void _onHunt() {
+    final profileState = context.read<ProfileBloc>().state;
+    if (profileState is ProfileLoaded && profileState.profile.hunger <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Ваш голод утолён, вам незачем охотиться'),
+          backgroundColor: Colors.blue,
+        ),
+      );
+      return;
+    }
+
     final domainState = context.read<DomainBloc>().state;
     if (_position == null || domainState is! DomainsLoaded) return;
 
@@ -145,26 +152,22 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
   }
 
   void _openDomainScreen() {
-    context.read<DomainBloc>().add(RefreshDomains(widget.profile));
+    // Инициируем загрузку доменов перед переходом
+    context.read<DomainBloc>().add(LoadDomains());
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => BlocProvider.value(
-          value: context.read<MasqueradeBloc>(),
-          child: const DomainScreen(),
-        ),
-      ),
+      MaterialPageRoute(builder: (_) => const DomainsScreen()),
     );
   }
 
   void _openCarpetChat() {
-  if (widget.profile.clan != 'Малкавиан' && 
-      !widget.profile.isAdmin && 
-      !widget.profile.isStoryteller) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Доступно только Малкавианам и администраторам')),
-    );
-    return;
+    if (widget.profile.clan != 'Малкавиан' &&
+        !widget.profile.isAdmin &&
+        !widget.profile.isStoryteller) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Доступно только Малкавианам и администраторам')),
+      );
+      return;
     }
 
     Navigator.push(
@@ -175,7 +178,6 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
     );
   }
 
-  // Функция для получения иконки клана
   IconData _getClanIcon(String clan) {
     switch (clan.toLowerCase()) {
       case 'ventrue':
@@ -197,7 +199,7 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
     }
   }
 
-  @override
+   @override
   Widget build(BuildContext context) {
     return BlocBuilder<ProfileBloc, ProfileState>(
       builder: (context, profileState) {
@@ -247,14 +249,14 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
                 ],
               ),
             ),
-                        actions: [
-                          if( profile.clan == 'Малкавиан')
-                 IconButton(
+            leading: (profile.clan == 'Малкавиан' || profile.isAdmin || profile.isStoryteller)
+                ? IconButton(
                     icon: Icon(Icons.chat, color: Colors.amber[200]),
                     onPressed: _openCarpetChat,
                     tooltip: 'Коврочат',
                   )
-                ,
+                : null,
+            actions: [
               IconButton(
                 icon: Icon(Icons.account_circle, color: Colors.amber[200]),
                 onPressed: _openProfileScreen,
@@ -302,89 +304,67 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
                 );
               }
             },
-            child: BlocListener<DomainBloc, DomainState>(
-              listener: (context, state) {
-                if (state is CurrentUserDomainLoaded) {
-                  setState(() {
-                    _currentUserDomain = state.domain;
-                  });
-                }
-              },
-              child: Stack(
-                children: [
-                  FlutterMap(
-                    mapController: _mapController,
-                    options: MapOptions(
-                      initialCenter: _position != null
-                          ? LatLng(_position!.latitude, _position!.longitude)
-                          : const LatLng(55.751244, 37.618423),
-                      initialZoom: 13,
-                      interactionOptions: const InteractionOptions(
-                        flags: ~InteractiveFlag.doubleTapDragZoom,
-                      ),
+            child: Stack(
+              children: [
+                FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: _position != null
+                        ? LatLng(_position!.latitude, _position!.longitude)
+                        : const LatLng(55.751244, 37.618423),
+                    initialZoom: 13,
+                    interactionOptions: const InteractionOptions(
+                      flags: ~InteractiveFlag.doubleTapDragZoom,
                     ),
-                    children: [
-                      TileLayer(
-                        urlTemplate:
-                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'com.masquerade.app',
-                      ),
-                      if (_currentUserDomain != null &&
-                          _currentUserDomain!.boundaryPoints.isNotEmpty)
-                        PolygonLayer(
-                          polygons: [
-                            Polygon(
-                              points: _currentUserDomain!.boundaryPoints,
-                              color: Color(0xFF8B0000).withOpacity(0.3),
-                              borderColor: Color(0xFFD4AF37),
-                              borderStrokeWidth: 2,
-                            ),
-                          ],
-                        ),
-                      if (_position != null)
-                        MarkerLayer(
-                          markers: [
-                            Marker(
-                              point: LatLng(
-                                _position!.latitude,
-                                _position!.longitude,
-                              ),
-                              width: 48,
-                              height: 48,
-                              child: Icon(
-                                _getClanIcon(profile.clan),
-                                color: Color(0xFFD4AF37),
-                                size: 48,
-                              ),
-                            ),
-                          ],
-                        ),
-                    ],
                   ),
-                  if (_isLoadingLocation)
-                    Center(
-                      child: Container(
-                        padding: EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.7),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: CircularProgressIndicator(
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Color(0xFFD4AF37),
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.masquerade.app',
+                    ),
+                    if (_position != null)
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: LatLng(
+                              _position!.latitude,
+                              _position!.longitude,
+                            ),
+                            width: 48,
+                            height: 48,
+                            child: Icon(
+                              _getClanIcon(profile.clan),
+                              color: Color(0xFFD4AF37),
+                              size: 48,
+                            ),
                           ),
+                        ],
+                      ),
+                  ],
+                ),
+                if (_isLoadingLocation)
+                  Center(
+                    child: Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Color(0xFFD4AF37),
                         ),
                       ),
                     ),
-                  // Статус-бар с информацией о персонаже
-                  Positioned(
-                    top: 10,
-                    left: 10,
-                    right: 10,
-                    child: _buildCharacterStatusBar(profile),
                   ),
-                ],
-              ),
+                Positioned(
+                  top: 10,
+                  left: 10,
+                  right: 10,
+                  child: _buildCharacterStatusBar(profile),
+                ),
+              ],
             ),
           ),
           floatingActionButtonLocation:
@@ -410,7 +390,7 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
                     icon: Icons.restaurant,
                     label: 'Охотиться',
                     color: Color(0xFF8B0000),
-                    onPressed: profile.isHungry ? _onHunt : null,
+                    onPressed: _onHunt
                   ),
                   _buildActionButton(
                     icon: Icons.warning,
@@ -434,7 +414,6 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
                     color: Color(0xFF2A0000),
                     onPressed: _openDomainScreen,
                   ),
-                  // Новая кнопка для броска монетки
                   _buildActionButton(
                     icon: Icons.monetization_on,
                     label: 'Монетка',
@@ -459,7 +438,6 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
   Widget _buildCharacterStatusBar(ProfileModel profile) {
     return BlocBuilder<ProfileBloc, ProfileState>(
       builder: (context, state) {
-        // Используем актуальное состояние профиля
         final currentProfile = (state is ProfileLoaded)
             ? state.profile
             : profile;
@@ -506,12 +484,12 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
                         profile.characterName,
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          fontSize: 18, // Увеличенный размер
-                          color: Colors.amber[200], // Яркий контрастный цвет
+                          fontSize: 18,
+                          color: Colors.amber[200],
                           fontFamily: 'Gothic',
                           shadows: [
                             Shadow(
-                              blurRadius: 6.0, // Усиленная тень
+                              blurRadius: 6.0,
                               color: Colors.black,
                               offset: Offset(2.0, 2.0),
                             ),
@@ -531,7 +509,6 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                // Индикатор голода
                 _buildStatusIndicator(
                   icon: Icons.favorite,
                   value: currentProfile.hunger,
@@ -539,7 +516,6 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
                   max: 5,
                 ),
                 const SizedBox(width: 8),
-                // Индикатор силы крови
                 _buildStatusIndicator(
                   icon: Icons.whatshot,
                   value: currentProfile.bloodPower,

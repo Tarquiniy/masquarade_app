@@ -7,14 +7,13 @@ class ProfileModel {
   final List<String> disciplines;
   final int bloodPower;
   final int hunger;
-  final int? domainId;
+  final List<int> domainIds; // Изменено на список
   final String role;
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? external_name;
   final int adminInfluence;
   final List<Map<String, dynamic>> pillars;
-  
 
   ProfileModel({
     required this.id,
@@ -25,7 +24,7 @@ class ProfileModel {
     required this.disciplines,
     required this.bloodPower,
     required this.hunger,
-    required this.domainId,
+    required this.domainIds, // Изменено
     required this.role,
     required this.createdAt,
     required this.updatedAt,
@@ -44,9 +43,7 @@ class ProfileModel {
       disciplines: List<String>.from(json['disciplines'] ?? []),
       bloodPower: json['blood_power'] ?? 0,
       hunger: json['hunger'] ?? 0,
-      domainId: json['domain_id'] != null
-          ? int.tryParse(json['domain_id'].toString())
-          : null,
+      domainIds: List<int>.from(json['domain_ids'] ?? []), // Изменено
       role: json['role'] ?? 'user',
       createdAt: DateTime.parse(
         json['created_at'] ?? DateTime.now().toIso8601String(),
@@ -58,7 +55,7 @@ class ProfileModel {
       adminInfluence: (json['admin_influence'] as num?)?.toInt() ?? 0,
       pillars: List<Map<String, dynamic>>.from(
         json['pillars'] ?? [],
-      ), // Чтение столпов
+      ),
     );
   }
 
@@ -72,17 +69,17 @@ class ProfileModel {
       'disciplines': disciplines,
       'blood_power': bloodPower,
       'hunger': hunger,
-      'domain_id': domainId,
+      'domain_ids': domainIds, // Изменено
       'role': role,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
-      'telegram_username': external_name,
+      'external_name': external_name,
       'admin_influence': adminInfluence,
       'pillars': pillars,
     };
   }
 
-  bool get isDomainOwner => domainId != null;
+  bool get isDomainOwner => domainIds.isNotEmpty; // Изменено
   bool get isAdmin => role == 'admin';
   bool get isStoryteller => role == 'storyteller';
   bool get isHungry => hunger > 0;
@@ -96,7 +93,7 @@ class ProfileModel {
     List<String>? disciplines,
     int? bloodPower,
     int? hunger,
-    int? domainId,
+    List<int>? domainIds, // Изменено
     String? role,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -112,7 +109,7 @@ class ProfileModel {
       disciplines: disciplines ?? List.from(this.disciplines),
       bloodPower: bloodPower ?? this.bloodPower,
       hunger: hunger ?? this.hunger,
-      domainId: domainId ?? this.domainId,
+      domainIds: domainIds ?? List.from(this.domainIds),
       role: role ?? this.role,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

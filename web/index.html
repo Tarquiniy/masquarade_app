@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Masquerade App">
-  
+
   <!-- PWA конфигурация -->
   <meta name="theme-color" content="#000000">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -13,14 +13,14 @@
   <meta name="apple-mobile-web-app-title" content="Masquerade">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  
+
   <!-- Заголовки для решения проблем с кешированием -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  
-  <title>Masquerade</title>
-  
+
+  <title>Tankograd</title>
+
   <style>
     html, body {
       margin: 0;
@@ -29,7 +29,7 @@
       height: 100%;
       background-color: #000;
     }
-    
+
     body {
       -webkit-tap-highlight-color: transparent;
       -webkit-touch-callout: none;
@@ -37,7 +37,7 @@
       user-select: none;
     }
   </style>
-  
+
   <script>
     window.addEventListener('load', function(ev) {
       if (window.location.pathname !== '/') {
@@ -69,5 +69,18 @@
 <body>
   <script src="flutter.js" defer></script>
   <script src="main.dart.js" type="application/javascript"></script>
+
+<!-- Скрипт для принудительного обновления изображений -->
+  <script>
+    function refreshImages() {
+      document.querySelectorAll('img').forEach(img => {
+        const src = img.src;
+        img.src = '';
+        img.src = src + '?t=' + new Date().getTime();
+      });
+    }
+    
+    setInterval(refreshImages, 5000); // Обновлять каждые 5 секунд
+  </script>
 </body>
 </html>

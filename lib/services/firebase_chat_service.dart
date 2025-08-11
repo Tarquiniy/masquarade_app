@@ -1,59 +1,43 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:masquarade_app/utils/debug_telegram.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class FirebaseChatService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final SupabaseClient _supabase = Supabase.instance.client;
-  final Map<String, String> _nameCache = {};
 
   Future<void> sendMessage({
     required String senderId,
-    required String? text,
+    String? text,
     String? mediaUrl,
     String? mediaType,
+    int? duration,
+    String? fileName,
   }) async {
-    String characterName = _nameCache[senderId] ?? await _getCharacterName(senderId);
-    String role = await _getUserRole(senderId);
-    
-    await _firestore.collection('carpet_chat').add({
-      'senderId': senderId,
-      'senderName': characterName,
-      'senderRole': role,
-      if (text != null) 'text': text,
-      'timestamp': FieldValue.serverTimestamp(),
-      if (mediaUrl != null) 'mediaUrl': mediaUrl,
-      if (mediaType != null) 'mediaType': mediaType,
-    });
-  }
-
-  Future<String> _getCharacterName(String userId) async {
     try {
-      final response = await _supabase
+      final profileData = await _supabase
           .from('profiles')
-          .select('character_name')
-          .eq('id', userId)
-          .single()
-          .timeout(const Duration(seconds: 3));
+          .select()
+          .eq('id', senderId)
+          .maybeSingle();
 
-      _nameCache[userId] = response['character_name'] ?? 'Неизвестный';
-      return _nameCache[userId]!;
+      final characterName = profileData?['character_name'] as String? ?? 'Unknown';
+      final role = profileData?['role'] as String? ?? 'user';
+
+      await _firestore.collection('carpet_chat').add({
+        'senderId': senderId,
+        'senderName': characterName,
+        'text': text,
+        'mediaUrl': mediaUrl,
+        'timestamp': FieldValue.serverTimestamp(),
+        'mediaType': mediaType,
+        'duration': duration,
+        'senderRole': role,
+        'fileName': fileName,
+      });
     } catch (e) {
-      return 'Неизвестный';
-    }
-  }
-
-  Future<String> _getUserRole(String userId) async {
-    try {
-      final response = await _supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', userId)
-          .single()
-          .timeout(const Duration(seconds: 3));
-
-      return response['role'] ?? 'user';
-    } catch (e) {
-      return 'user';
+      sendDebugToTelegram('Error sending message: $e');
+      rethrow;
     }
   }
 
@@ -62,5 +46,14 @@ class FirebaseChatService {
         .collection('carpet_chat')
         .orderBy('timestamp', descending: true)
         .snapshots();
+  }
+
+  Future<void> deleteMessage(String messageId) async {
+    try {
+      await _firestore.collection('carpet_chat').doc(messageId).delete();
+    } catch (e) {
+      sendDebugToTelegram('Error deleting message: $e');
+      rethrow;
+    }
   }
 }

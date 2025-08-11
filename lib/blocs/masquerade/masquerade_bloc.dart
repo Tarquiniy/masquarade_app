@@ -74,83 +74,78 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
   }
 
   Future<void> _onStartHunt(
-    StartHunt event,
-    Emitter<MasqueradeState> emit,
-  ) async {
-    try {
-      final domainDebugInfo = 'Домен: ${event.domainId}';
+  StartHunt event,
+  Emitter<MasqueradeState> emit,
+) async {
+  try {
+    final domainDebugInfo = 'Домен: ${event.domainId}';
+
+    await sendDebugToTelegram(
+      '🔍 Начата охота\n'
+      'Игрок: ${currentProfile.characterName} (${currentProfile.id})\n'
+      '$domainDebugInfo\n'
+      'Владелец домена: ${event.isDomainOwner ? "Да" : "Нет"}\n'
+      'Текущий голод: ${currentProfile.hunger}\n'
+      'Позиция: ${event.position.latitude}, ${event.position.longitude}',
+    );
+
+    // Проверяем, что голод > 0
+    if (currentProfile.hunger <= 0) {
+      final message = '❌ Охота отменена: голод уже утолён';
+      await sendDebugToTelegram(message);
+      emit(const ViolationsError('Ваш голод утолён, охотиться незачем.'));
+      return;
+    }
+
+    final newHunger = currentProfile.hunger - 1;
+    // Гарантируем, что голод не станет отрицательным
+    final clampedHunger = newHunger > 0 ? newHunger : 0;
+    await repository.updateHunger(currentProfile.id, clampedHunger);
+
+    final violationProbability = event.isDomainOwner ? 0.25 : 0.5;
+    final violationOccurs = _random.nextDouble() < violationProbability;
+
+    String huntResultMessage = '✅ Охота успешна! Восстановлен 1 пункт голода';
+    String violationMessage = '';
+    int costToClose = 0;
+
+    if (violationOccurs) {
+      costToClose = event.isDomainOwner ? 1 : 2;
 
       await sendDebugToTelegram(
-        '🔍 Начата охота\n'
-        'Игрок: ${currentProfile.characterName} (${currentProfile.id})\n'
-        '$domainDebugInfo\n'
-        'Владелец домена: ${event.isDomainOwner ? "Да" : "Нет"}\n'
-        'Текущий голод: ${currentProfile.hunger}\n'
-        'Позиция: ${event.position.latitude}, ${event.position.longitude}',
+        '⚠️ Создаем нарушение с параметрами:\n'
+        'Violator ID: ${currentProfile.id}\n'
+        'Domain ID: ${event.domainId}\n'
+        'Cost to close: $costToClose\n'
+        'Lat/Lng: ${event.position.latitude}, ${event.position.longitude}',
       );
 
-      if (currentProfile.hunger == 0) {
-        final message = '❌ Охота отменена: недостаточно голода';
-        await sendDebugToTelegram(message);
-        emit(const ViolationsError('Вы слишком голодны для охоты.'));
-        return;
-      }
-
-      // Уменьшаем голод за охоту
-      final newHunger = currentProfile.hunger - 1;
-      final updatedProfile = await repository.updateHunger(
-        currentProfile.id,
-        newHunger,
+      await _createViolation(
+        description: 'Неосторожная охота',
+        hungerSpent: 1,
+        latitude: event.position.latitude,
+        longitude: event.position.longitude,
+        domainId: event.domainId,
+        emit: emit, isHunt: true,
       );
-      if (updatedProfile != null) {
-        profileBloc.add(UpdateProfile(updatedProfile));
-      }
-
-      final violationProbability = event.isDomainOwner ? 0.25 : 0.5;
-      final violationOccurs = _random.nextDouble() < violationProbability;
-
-      String huntResultMessage = '✅ Охота успешна! Восстановлен 1 пункт голода';
-      String violationMessage = '';
-      int costToClose = 0;
-
-      if (violationOccurs) {
-        costToClose = event.isDomainOwner ? 1 : 2;
-
-        await sendDebugToTelegram(
-          '⚠️ Создаем нарушение с параметрами:\n'
-          'Violator ID: ${currentProfile.id}\n'
-          'Domain ID: ${event.domainId}\n'
-          'Cost to close: $costToClose\n'
-          'Lat/Lng: ${event.position.latitude}, ${event.position.longitude}',
-        );
-
-        await _createViolation(
-          description: 'Неосторожная охота',
-          hungerSpent: 1,
-          latitude: event.position.latitude,
-          longitude: event.position.longitude,
-          domainId: event.domainId,
-          isHunt: true, // Нарушение при охоте
-          emit: emit,
-        );
-      }
-
-      await sendDebugToTelegram(huntResultMessage + violationMessage);
-      add(LoadViolations());
-
-      emit(
-        HuntCompleted(
-          violationOccurred: violationOccurs,
-          isDomainOwner: event.isDomainOwner,
-          costToClose: violationOccurs ? costToClose : 0,
-        ),
-      );
-    } catch (e) {
-      final errorDetails = '❌ Ошибка во время охоты: ${e.toString()}';
-      await sendDebugToTelegram(errorDetails);
-      emit(ViolationsError(errorDetails));
     }
+
+    await sendDebugToTelegram(huntResultMessage + violationMessage);
+    add(LoadViolations());
+
+    emit(
+      HuntCompleted(
+        violationOccurred: violationOccurs,
+        isDomainOwner: event.isDomainOwner,
+        costToClose: violationOccurs ? costToClose : 0,
+      ),
+    );
+  } catch (e) {
+    final errorDetails = '❌ Ошибка во время охоты: ${e.toString()}';
+    await sendDebugToTelegram(errorDetails);
+    emit(ViolationsError(errorDetails));
   }
+}
 
   Future<void> _onCloseViolation(
     CloseViolation event,

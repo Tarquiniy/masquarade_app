@@ -27,4 +27,21 @@ class LoadUserDomain extends DomainEvent {
   List<Object?> get props => [userId];
 }
 
-class LoadCurrentUserDomain extends DomainEvent {}
+class LoadCurrentUserDomain extends DomainEvent {
+  final String userId;
+
+  const LoadCurrentUserDomain(this.userId);
+
+  @override
+  List<Object?> get props => [userId];
+}
+
+// Новое событие для загрузки всех доменов пользователя
+class LoadUserDomains extends DomainEvent {
+  final String userId;
+
+  const LoadUserDomains(this.userId);
+
+  @override
+  List<Object?> get props => [userId];
+}

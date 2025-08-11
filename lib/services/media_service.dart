@@ -1,48 +1,46 @@
 import 'dart:typed_data';
-
+import 'package:masquarade_app/utils/debug_telegram.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide Provider;
-import '../env.dart'; // Импортируем сервисный ключ
+import '../env.dart';
 
 class MediaService {
-  late final SupabaseClient _client;
+  final SupabaseClient _clientForStorage;
+  final String _bucketName = 'carpet-chat.media';
 
-  MediaService(SupabaseClient? client) {
-    // Создаем клиент с сервисной ролью для обхода RLS
-    _client = client ?? SupabaseClient(
-      supabase_url,
-      supabase_serviceKey, // Используем сервисный ключ
-      );
-  }
+  MediaService() 
+    : _clientForStorage = SupabaseClient(supabase_url, supabase_serviceKey);
 
   Future<String> uploadMedia(
     Uint8List bytes,
-    String fileName,
-    {required String fileType}
-  ) async {
-    final contentType = _getContentType(fileType);
-
+    String fileName, {
+    required String fileType,
+  }) async {
     try {
-      await _client.storage
-        .from('carpet-chat.media')
+      await _clientForStorage.storage
+        .from(_bucketName)
         .uploadBinary(
           fileName,
           bytes,
-          fileOptions: FileOptions(contentType: contentType),
+          fileOptions: FileOptions(
+            contentType: _getContentType(fileType),
+            upsert: true,
+          ),
         );
 
-      return _client.storage
-        .from('carpet-chat.media')
+      return _clientForStorage.storage
+        .from(_bucketName)
         .getPublicUrl(fileName);
     } catch (e) {
+      sendDebugToTelegram('❌ Ошибка загрузки: $e');
       throw Exception('Ошибка загрузки: $e');
     }
   }
 
   String _getContentType(String fileType) {
-    return fileType == 'image' 
+    return fileType == 'image'
         ? 'image/jpeg'
         : fileType == 'audio'
-          ? 'audio/mpeg'
-          : 'application/octet-stream';
+            ? 'audio/mpeg'
+            : 'application/octet-stream';
   }
 }
