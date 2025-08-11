@@ -3,20 +3,30 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:masquarade_app/env.dart';
 import 'package:masquarade_app/utils/debug_telegram.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
+import 'package:firebase_core/firebase_core.dart';
 
 import 'screens/home_screen.dart';
 import 'screens/enter_username_screen.dart';
-
 import 'blocs/auth/auth_bloc.dart';
 import 'blocs/domain/domain_bloc.dart';
 import 'blocs/masquerade/masquerade_bloc.dart';
 import 'blocs/profile/profile_bloc.dart';
-
 import 'repositories/supabase_repository.dart';
 import 'services/supabase_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(
+    options: const FirebaseOptions(
+      apiKey: "AIzaSyCpQyNCQYkSajBX5Wr8Ii9wlDP4nX6wchE",
+      authDomain: "tankograd.firebaseapp.com",
+      projectId: "tankograd",
+      storageBucket: "tankograd.firebasestorage.app",
+      messagingSenderId: "255328966030",
+      appId: "1:255328966030:web:dd88de76c1a68c6cdf80df"
+    ),
+  );
 
   await Supabase.initialize(url: supabase_url, anonKey: supabase_anonKey);
 
@@ -106,7 +116,7 @@ class AppEntry extends StatelessWidget {
             create: (_) => MasqueradeBloc(
               repository: repository,
               currentProfile: profile,
-              profileBloc: context.read<ProfileBloc>(), // ДОБАВЛЕНО
+              profileBloc: context.read<ProfileBloc>(),
             )..add(LoadViolations()),
             child: const HomeScreen(),
           );

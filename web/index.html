@@ -45,6 +45,26 @@
       }
     });
   </script>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-storage-compat.js"></script>
+
+  <script>
+    // Ваша конфигурация Firebase
+    const firebaseConfig = {
+  apiKey: "AIzaSyCpQyNCQYkSajBX5Wr8Ii9wlDP4nX6wchE",
+  authDomain: "tankograd.firebaseapp.com",
+  projectId: "tankograd",
+  storageBucket: "tankograd.firebasestorage.app",
+  messagingSenderId: "255328966030",
+  appId: "1:255328966030:web:dd88de76c1a68c6cdf80df"
+};
+
+    // Инициализация Firebase
+    firebase.initializeApp(firebaseConfig);
+  </script>
 </head>
 <body>
   <script src="flutter.js" defer></script>

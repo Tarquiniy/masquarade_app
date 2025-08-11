@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:masquarade_app/utils/debug_telegram.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/profile_model.dart';
@@ -435,7 +438,6 @@ class SupabaseService {
     }
   }
 
-  // Новый метод для обновления влияния домена
   Future<void> updateDomainInfluence(int domainId, int newInfluence) async {
     try {
       await client
@@ -445,6 +447,27 @@ class SupabaseService {
     } catch (e) {
       print('❌ Ошибка обновления влияния домена: $e');
       rethrow;
+    }
+  }
+
+  Future<String> uploadMedia(
+    Uint8List bytes,
+    String fileName,
+    {required String fileType}
+  ) async {
+    try {
+      await client.storage
+        .from('carpet_chat_media')
+        .uploadBinary(
+          fileName,
+          bytes,
+        );
+
+      return client.storage
+        .from('carpet_chat_media')
+        .getPublicUrl(fileName);
+    } catch (e) {
+      throw Exception('Ошибка загрузки: $e');
     }
   }
 }

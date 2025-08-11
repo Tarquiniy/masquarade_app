@@ -14,8 +14,9 @@ import '../blocs/masquerade/masquerade_bloc.dart';
 import 'profile_screen.dart';
 import 'masquerade_violation_screen.dart';
 import 'domain_screen.dart';
-import 'coin_flip_screen.dart'; // Добавлен экран монетки
+import 'coin_flip_screen.dart';
 import '../utils/debug_telegram.dart';
+import 'carpet_chat_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -156,6 +157,24 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
     );
   }
 
+  void _openCarpetChat() {
+  if (widget.profile.clan != 'Малкавиан' && 
+      !widget.profile.isAdmin && 
+      !widget.profile.isStoryteller) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Доступно только Малкавианам и администраторам')),
+    );
+    return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CarpetChatScreen(profile: widget.profile),
+      ),
+    );
+  }
+
   // Функция для получения иконки клана
   IconData _getClanIcon(String clan) {
     switch (clan.toLowerCase()) {
@@ -165,7 +184,7 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
         return Icons.flash_on;
       case 'toreador':
         return Icons.brush;
-      case 'malkavian':
+      case 'Малкавиан':
         return Icons.psychology;
       case 'nosferatu':
         return Icons.visibility_off;
@@ -193,7 +212,7 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
         return Scaffold(
           appBar: AppBar(
             title: Text(
-              'Маскарад',
+              'Танкоград',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 24,
@@ -228,7 +247,14 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
                 ],
               ),
             ),
-            actions: [
+                        actions: [
+                          if( profile.clan == 'Малкавиан')
+                 IconButton(
+                    icon: Icon(Icons.chat, color: Colors.amber[200]),
+                    onPressed: _openCarpetChat,
+                    tooltip: 'Коврочат',
+                  )
+                ,
               IconButton(
                 icon: Icon(Icons.account_circle, color: Colors.amber[200]),
                 onPressed: _openProfileScreen,
@@ -563,37 +589,36 @@ class _HomeScreenContentState extends State<_HomeScreenContent> {
   }
 
   // Виджет кнопки действия
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback? onPressed,
-  }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-      child: ElevatedButton.icon(
-        onPressed: onPressed,
-        icon: Icon(icon, color: Color(0xFFD4AF37), size: 24),
-        label: Text(
-          label,
-          style: TextStyle(
-            color: Color(0xFFD4AF37),
-            fontWeight: FontWeight.bold,
-            fontSize: 14,
-            fontFamily: 'Gothic',
-          ),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: color.withOpacity(0.9),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(25),
-            side: BorderSide(color: Color(0xFFD4AF37), width: 1.5),
-          ),
-          elevation: 5,
-          shadowColor: Colors.black.withOpacity(0.5),
+ Widget _buildActionButton({
+  required IconData icon,
+  required String label,
+  required Color color,
+  required VoidCallback? onPressed,
+}) {
+  return Container(
+    margin: const EdgeInsets.symmetric(horizontal: 4),
+    child: ElevatedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, color: Color(0xFFD4AF37), size: 24),
+      label: Text(
+        label,
+        style: TextStyle(
+          color: Color(0xFFD4AF37),
+          fontWeight: FontWeight.bold,
+          fontSize: 14,
+          fontFamily: 'Gothic',
         ),
       ),
-    );
-  }
-}
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color.withOpacity(0.9),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(25),
+          side: BorderSide(color: Color(0xFFD4AF37), width: 1.5),
+        ),
+        elevation: 5,
+        shadowColor: Colors.black.withOpacity(0.5),
+      ),
+    ),
+  );
+}}

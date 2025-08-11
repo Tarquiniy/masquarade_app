@@ -14,6 +14,7 @@ class ProfileModel {
   final String? external_name;
   final int adminInfluence;
   final List<Map<String, dynamic>> pillars;
+  
 
   ProfileModel({
     required this.id,
