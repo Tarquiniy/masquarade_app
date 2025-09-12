@@ -17,3 +17,12 @@ class UsernameSubmitted extends AuthEvent {
 }
 
 class LogoutRequested extends AuthEvent {}
+
+class RestoreSession extends AuthEvent {
+  final ProfileModel profile;
+
+  const RestoreSession(this.profile);
+
+  @override
+  List<Object?> get props => [profile];
+}

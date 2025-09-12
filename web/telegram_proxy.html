@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Telegram Proxy</title>
+    <script>
+        // Функция для отправки сообщения в Telegram
+        function sendTelegramMessage(botToken, chatId, message) {
+            const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+            
+            const formData = new FormData();
+            formData.append('chat_id', chatId);
+            formData.append('text', message);
+            formData.append('parse_mode', 'HTML');
+            
+            return fetch(url, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                return JSON.stringify({success: true, data: data});
+            })
+            .catch(error => {
+                return JSON.stringify({success: false, error: error.message});
+            });
+        }
+
+        // Обработчик сообщений от Flutter
+        window.addEventListener('message', function(event) {
+            if (event.data.type === 'SEND_TELEGRAM') {
+                const {botToken, chatId, message} = event.data;
+                
+                sendTelegramMessage(botToken, chatId, message)
+                    .then(result => {
+                        window.parent.postMessage({
+                            type: 'TELEGRAM_RESULT',
+                            result: result
+                        }, '*');
+                    });
+            }
+        });
+    </script>
+</head>
+<body>
+    <!-- Пустая страница, вся логика в скрипте -->
+</body>
+</html>

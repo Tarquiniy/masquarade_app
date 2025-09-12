@@ -21,12 +21,14 @@ class FirebaseChatService {
           .eq('id', senderId)
           .maybeSingle();
 
+      // ВСЕГДА сохраняем настоящее имя персонажа
       final characterName = profileData?['character_name'] as String? ?? 'Unknown';
       final role = profileData?['role'] as String? ?? 'user';
 
       await _firestore.collection('carpet_chat').add({
         'senderId': senderId,
-        'senderName': characterName,
+        'senderName': characterName, // Сохраняем настоящее имя
+        'realSenderName': characterName, // Дополнительное поле для администраторов
         'text': text,
         'mediaUrl': mediaUrl,
         'timestamp': FieldValue.serverTimestamp(),

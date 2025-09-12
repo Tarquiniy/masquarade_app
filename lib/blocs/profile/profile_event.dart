@@ -7,6 +7,15 @@ abstract class ProfileEvent extends Equatable {
   List<Object?> get props => [];
 }
 
+class UpdateHunger extends ProfileEvent {
+  final int newHunger;
+
+  const UpdateHunger(this.newHunger);
+
+  @override
+  List<Object?> get props => [newHunger];
+}
+
 class SetProfile extends ProfileEvent {
   final ProfileModel profile;
 
@@ -39,4 +48,12 @@ class DestroyPillar extends ProfileEvent {
 
   @override
   List<Object?> get props => [pillarName];
+}
+
+class UpdateInfluence extends ProfileEvent {
+  final int newInfluence;
+  const UpdateInfluence(this.newInfluence);
+
+  @override
+  List<Object?> get props => [newInfluence];
 }

@@ -37,13 +37,15 @@ class HuntCompleted extends MasqueradeState {
   final bool violationOccurred;
   final bool isDomainOwner;
   final int costToClose;
+  final int newHunger;
 
   const HuntCompleted({
     required this.violationOccurred,
     required this.isDomainOwner,
     required this.costToClose,
+    required this.newHunger,
   });
 
   @override
-  List<Object?> get props => [violationOccurred, isDomainOwner, costToClose];
+  List<Object?> get props => [violationOccurred, isDomainOwner, costToClose, newHunger,];
 }

@@ -16,19 +16,29 @@ class _CoinFlipScreenState extends State<CoinFlipScreen>
   String _result = '';
   String _side = 'Орёл';
   double _rotation = 0;
+  bool _showFront = true; // Новое состояние для отслеживания видимой стороны
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: 1000),
+      duration: Duration(milliseconds: 2000), // Увеличенная длительность анимации
     );
 
     _animation = Tween<double>(begin: 0, end: 1).animate(_controller)
       ..addListener(() {
         setState(() {
+          // Обновляем вращение с эффектом замедления в конце
           _rotation = _animation.value * 10 * pi;
+          
+          // Определяем видимую сторону во время вращения
+          final progress = _animation.value;
+          if (progress > 0.45 && progress < 0.55) {
+            _showFront = false; // Показываем обратную сторону в середине анимации
+          } else {
+            _showFront = true;
+          }
         });
       })
       ..addStatusListener((status) {
@@ -44,6 +54,7 @@ class _CoinFlipScreenState extends State<CoinFlipScreen>
     setState(() {
       _isFlipping = true;
       _result = '';
+      _showFront = true;
       _side = _random.nextBool() ? 'Орёл' : 'Решка';
     });
 
@@ -55,6 +66,7 @@ class _CoinFlipScreenState extends State<CoinFlipScreen>
     setState(() {
       _result = _side;
       _isFlipping = false;
+      _showFront = _side == 'Орёл'; // Фиксируем окончательную сторону
     });
   }
 
@@ -78,7 +90,7 @@ class _CoinFlipScreenState extends State<CoinFlipScreen>
           children: [
             Transform(
               alignment: Alignment.center,
-              transform: Matrix4.rotationY(_rotation),
+              transform: Matrix4.rotationX(_rotation), // Изменено на rotationX
               child: Container(
                 width: 150,
                 height: 150,
@@ -96,7 +108,8 @@ class _CoinFlipScreenState extends State<CoinFlipScreen>
                 ),
                 child: Center(
                   child: Text(
-                    _rotation ~/ pi % 2 == 0 ? 'Орёл' : 'Решка',
+                    // Фикс: используем состояние для определения видимой стороны
+                    _showFront ? 'Орёл' : 'Решка',
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,

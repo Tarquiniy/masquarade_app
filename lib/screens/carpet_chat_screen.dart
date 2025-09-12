@@ -1,23 +1,24 @@
 import 'dart:async';
-import 'dart:convert' as ui;
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:photo_view/photo_view.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:audioplayers/audioplayers.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb, consolidateHttpClientResponseBytes;
 
-import '../models/profile_model.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:masquarade_app/repositories/supabase_repository.dart';
+import 'package:photo_view/photo_view.dart';
+import 'package:universal_html/js.dart' as js;
+
 import '../models/carpet_chat_message_model.dart';
-import '../services/firebase_chat_service.dart' hide MediaService;
+import '../models/profile_model.dart';
+import '../services/firebase_chat_service.dart';
 import '../services/media_service.dart';
 import '../utils/debug_telegram.dart';
-import '../services/media_service.dart' as custom_media; // Уточненный импорт
 
 class CarpetChatScreen extends StatefulWidget {
   final ProfileModel profile;
@@ -38,10 +39,12 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
   final Map<String, StreamSubscription<Duration>> _positionSubscriptions = {};
   final ScrollController _scrollController = ScrollController();
   String _errorMessage = '';
+  late final SupabaseRepository _repository;
 
   @override
   void initState() {
     super.initState();
+    _repository = context.read<SupabaseRepository>();
     _initChat();
     _mediaService = MediaService();
     sendDebugToTelegram('🚀 CarpetChatScreen инициализирован');
@@ -87,59 +90,102 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
   }
 }
 
-  void _sendMessage() {
-    final text = _messageController.text.trim();
-    if (text.isEmpty) return;
+  Future<void> _notifyMalkavians() async {
+  try {
+    // Получаем всех Малкавиан с сохраненными chat_id
+    final malkavians = await _repository.getMalkaviansWithTelegram();
+    
+    // Фильтруем, исключая отправителя сообщения
+    final recipients = malkavians.where((profile) => 
+      profile.telegramChatId != null && 
+      profile.telegramChatId!.isNotEmpty &&
+      profile.id != widget.profile.id
+    ).toList();
 
-    try {
-      sendDebugToTelegram('✉️ Отправка сообщения: "$text"');
-      _chatService.sendMessage(
-        senderId: widget.profile.id,
-        text: text,
-      );
-      _messageController.clear();
-    } catch (e, stackTrace) {
-      final errorMsg = '❌ Ошибка отправки: $e\n$stackTrace';
-      sendDebugToTelegram(errorMsg);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Ошибка отправки сообщения'),
-          backgroundColor: Colors.red,
-        ),
-      );
+    if (recipients.isEmpty) {
+      return; // Нет получателей для уведомлений
     }
+
+    // ФИКСИРОВАННЫЙ текст уведомления БЕЗ информации об отправителе
+    final notificationText = '💬 Новое сообщение в чате\nПроверьте чат в приложении';
+
+    // Отправляем уведомления всем получателям
+    for (final recipient in recipients) {
+      await sendTelegramMessageDirect(
+        recipient.telegramChatId!,
+        notificationText,
+      );
+      
+      // Небольшая задержка между сообщениями
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+
+    sendDebugToTelegram('✅ Уведомления отправлены ${recipients.length} Малкавианам');
+
+  } catch (e) {
+    sendDebugToTelegram('❌ Ошибка отправки уведомлений Малкавианам: $e');
   }
+}
+
+  void _sendMessage() {
+  final text = _messageController.text.trim();
+  if (text.isEmpty) return;
+
+  try {
+    sendDebugToTelegram('✉️ Отправка сообщения: "$text"');
+    _chatService.sendMessage(
+      senderId: widget.profile.id,
+      text: text,
+    );
+    _messageController.clear();
+    
+    // Отправляем уведомления Малкавианам
+    if (widget.profile.clan == 'Малкавиан') {
+      _notifyMalkavians(); // Без параметра!
+    }
+  } catch (e, stackTrace) {
+    final errorMsg = '❌ Ошибка отправки сообщения: ${e.toString()}\n${stackTrace.toString()}';
+    sendDebugToTelegram(errorMsg);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Ошибка отправки сообщения'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
 
   Future<void> _pickAndSendImage() async {
-    setState(() => _isUploading = true);
+  setState(() => _isUploading = true);
 
-    try {
-      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-      if (image == null) return;
+  try {
+    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+    if (image == null) return;
 
-      final bytes = await image.readAsBytes();
-      final mediaUrl = await _mediaService.uploadMedia(
-        bytes,
-        image.name,
-        fileType: 'image',
-      );
+    final bytes = await image.readAsBytes();
+    final mediaUrl = await _mediaService.uploadMedia(
+      bytes,
+      image.name,
+      fileType: 'image',
+    );
 
-      await _chatService.sendMessage(
-        senderId: widget.profile.id,
-        mediaUrl: mediaUrl,
-        mediaType: 'image',
-        fileName: image.name,
-      );
-    } catch (e, stackTrace) {
-      final errorMsg = '❌ Ошибка загрузки изображения: $e\n$stackTrace';
-      sendDebugToTelegram(errorMsg);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка загрузки: $e')),
-      );
-    } finally {
-      setState(() => _isUploading = false);
+    await _chatService.sendMessage(
+      senderId: widget.profile.id,
+      mediaUrl: mediaUrl,
+      mediaType: 'image',
+      fileName: image.name,
+    );
+
+    // Отправляем уведомления Малкавианам
+    if (widget.profile.clan == 'Малкавиан') {
+      _notifyMalkavians(); // Без параметра!
     }
+  } catch (e, stackTrace) {
+    // Обработка ошибок
+  } finally {
+    setState(() => _isUploading = false);
   }
+}
 
   Future<void> _pickAndSendAudio() async {
     setState(() => _isUploading = true);
@@ -161,6 +207,8 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
         fileType: 'audio',
       );
 
+      
+
       int durationInSeconds = await _getAudioDuration(bytes, mediaUrl);
 
       await _chatService.sendMessage(
@@ -170,6 +218,11 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
         duration: durationInSeconds,
         fileName: file.name,
       );
+
+      // Отправляем уведомления Малкавианам
+    if (widget.profile.clan == 'Малкавиан') {
+      _notifyMalkavians(); // Без параметра!
+    }
     } catch (e, stackTrace) {
       final errorMsg = '❌ Ошибка загрузки аудио: $e\n$stackTrace';
       sendDebugToTelegram(errorMsg);
@@ -255,7 +308,7 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('КОВРОЧАТ'),
+        title: const Text('Гобелен'),
         backgroundColor: const Color(0xFF4A0000),
       ),
       backgroundColor: const Color(0xFF1a0000),
@@ -367,6 +420,13 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
   final bool isAdmin = widget.profile.isAdmin || widget.profile.isStoryteller;
   final bool hasMedia = message.mediaUrl != null && message.mediaUrl!.isNotEmpty;
   final bool isAudio = message.mediaType == 'audio';
+  
+  // Показывать имя отправителя только если:
+  // - Текущий пользователь администратор
+  // - ИЛИ отправитель администратор
+  final bool showName = isAdmin;
+  //|| 
+    //  (message.senderRole == 'admin' || message.senderRole == 'storyteller');
 
   return GestureDetector(
     onLongPress: isAdmin
@@ -388,7 +448,8 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (isAdmin) Text(
+              // Показываем имя только для администраторов
+              if (showName) Text(
                 message.senderName,
                 style: TextStyle(
                   color: Colors.amber[200],

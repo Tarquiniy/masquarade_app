@@ -1,64 +1,128 @@
+import 'dart:async';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
-import '../../models/profile_model.dart';
-import '../../repositories/supabase_repository.dart';
+import 'package:masquarade_app/models/profile_model.dart';
+import 'package:masquarade_app/repositories/supabase_repository.dart';
+import 'package:masquarade_app/utils/debug_telegram.dart';
 
 part 'profile_event.dart';
 part 'profile_state.dart';
 
 class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
   final SupabaseRepository repository;
+  late StreamSubscription<ProfileModel> _profileSubscription;
+
+  @override
+  void onEvent(ProfileEvent event) {
+    super.onEvent(event);
+    if (event is SetProfile) {
+      sendDebugToTelegram('🔄 ProfileEvent: SetProfile(${event.profile.characterName})');
+    }
+  }
 
   ProfileBloc({required this.repository}) : super(ProfileInitial()) {
     on<SetProfile>(_onSetProfile);
     on<UpdateProfile>(_onUpdateProfile);
     on<ClearDomain>(_onClearDomain);
     on<DestroyPillar>(_onDestroyPillar);
+    on<UpdateHunger>((event, emit) {
+      if (state is ProfileLoaded) {
+        final currentState = state as ProfileLoaded;
+        final updatedProfile = currentState.profile.copyWith(
+          hunger: event.newHunger,
+      
+      // Явно сохраняем все остальные поля
+      id: currentState.profile.id,
+      characterName: currentState.profile.characterName,
+      sect: currentState.profile.sect,
+      clan: currentState.profile.clan,
+      humanity: currentState.profile.humanity,
+      disciplines: currentState.profile.disciplines,
+      bloodPower: currentState.profile.bloodPower,
+      domainIds: currentState.profile.domainIds,
+      role: currentState.profile.role,
+      createdAt: currentState.profile.createdAt,
+      updatedAt: currentState.profile.updatedAt,
+      pillars: currentState.profile.pillars,
+    );
+        emit(ProfileLoaded(updatedProfile));
+    sendDebugToTelegram('✅ Голод обновлён: ${event.newHunger}');
+      }}
+    );
   }
 
-  void _onSetProfile(SetProfile event, Emitter<ProfileState> emit) {
-    emit(ProfileLoaded(event.profile));
+  @override
+  Future<void> close() {
+    _profileSubscription.cancel();
+    return super.close();
   }
 
-  void _onUpdateProfile(UpdateProfile event, Emitter<ProfileState> emit) {
-    if (state is ProfileLoaded) {
-      // проверка на загрузку профиля
+  @override
+  void onTransition(Transition<ProfileEvent, ProfileState> transition) {
+    super.onTransition(transition);
+    sendDebugToTelegram(
+      '🔄 ProfileBloc Transition: ${transition.event} -> ${transition.nextState}'
+    );
+  }
+  
+Future<void> _onSetProfile(SetProfile event, Emitter<ProfileState> emit) async {
+    try {
+      final freshProfile = await repository.getProfileById(event.profile.id);
+      if (freshProfile != null) {
+        emit(ProfileLoaded(freshProfile));
+        sendDebugToTelegram('✅ Профиль обновлен: ${freshProfile.characterName}');
+
+        await _profileSubscription.cancel();
+        _profileSubscription = repository.profileChanges(freshProfile.id).listen((profile) {
+          add(SetProfile(profile));
+        });
+      } else {
+        emit(ProfileLoaded(event.profile));
+      }
+    } catch (e) {
       emit(ProfileLoaded(event.profile));
+      sendDebugToTelegram('❌ Ошибка загрузки профиля: $e');
     }
   }
 
-  void _onClearDomain(ClearDomain event, Emitter<ProfileState> emit) {
-    if (state is ProfileLoaded) {
-      final currentProfile = (state as ProfileLoaded).profile;
-      emit(ProfileLoaded(currentProfile.copyWith(domainIds: [])));
+  Future<void> _onUpdateProfile(UpdateProfile event, Emitter<ProfileState> emit) async {
+    final currentState = state;
+    if (currentState is ProfileLoaded) {
+      // Сохраняем предыдущие данные
+      emit(ProfileLoaded(event.profile.copyWith()));
     }
   }
 
-  // Обработчик разрушения столпа
-  void _onDestroyPillar(DestroyPillar event, Emitter<ProfileState> emit) {
-    if (state is ProfileLoaded) {
-      final currentProfile = (state as ProfileLoaded).profile;
-      final updatedPillars = currentProfile.pillars.map((pillar) {
-        if (pillar['name'] == event.pillarName) {
-          return {...pillar, 'destroyed': true};
-        }
-        return pillar;
-      }).toList();
-
-      emit(ProfileLoaded(currentProfile.copyWith(pillars: updatedPillars)));
+  Future<void> _onClearDomain(ClearDomain event, Emitter<ProfileState> emit) async {
+    final currentState = state;
+    if (currentState is ProfileLoaded) {
+      final updatedProfile = currentState.profile.copyWith(
+        domainIds: [],
+      );
+      emit(ProfileLoaded(updatedProfile));
     }
   }
 
-  /// Возвращает список всех игроков, кроме текущего
+  Future<void> _onDestroyPillar(DestroyPillar event, Emitter<ProfileState> emit) async {
+    final currentState = state;
+    if (currentState is ProfileLoaded) {
+      final newPillars = currentState.profile.pillars
+          .where((p) => p['name'] != event.pillarName)
+          .toList();
+
+      final updatedProfile = await repository.updatePillars(
+        currentState.profile.id,
+        newPillars,
+      );
+
+      if (updatedProfile != null) {
+        emit(ProfileLoaded(updatedProfile));
+      }
+    }
+  }
+
   Future<List<ProfileModel>> getPlayers() async {
-    final profiles = await repository.getAllProfiles();
-
-    final currentProfile = (state is ProfileLoaded)
-        ? (state as ProfileLoaded).profile
-        : null;
-
-    if (currentProfile == null) return profiles;
-
-    return profiles.where((p) => p.id != currentProfile.id).toList();
+    return await repository.getAllProfiles();
   }
 }

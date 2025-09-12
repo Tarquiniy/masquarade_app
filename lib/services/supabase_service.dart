@@ -1,8 +1,12 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:http/http.dart' as http;
 import 'package:masquarade_app/utils/debug_telegram.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:timezone/standalone.dart' as tz;
+import 'package:timezone/data/latest.dart' as tz;
 import '../models/profile_model.dart';
 import '../models/domain_model.dart';
 import '../models/violation_model.dart';
@@ -48,7 +52,7 @@ class SupabaseService {
     final profileRow = await client
         .from('predefined_profiles')
         .select()
-        .eq('telegram_username', telegramUsername)
+        .eq('external_name', telegramUsername)
         .maybeSingle();
 
     if (profileRow == null) {
@@ -58,155 +62,293 @@ class SupabaseService {
 
     debug?.call('[DEBUG AUTH] ✅ Профиль найден: ${profileRow.toString()}');
     return ProfileModel(
-      id: telegramUsername,
-      characterName: profileRow['character_name'],
-      sect: profileRow['sect'],
-      clan: profileRow['clan'],
-      status: profileRow['status'],
-      disciplines: List<String>.from(profileRow['disciplines']),
-      bloodPower: profileRow['blood_power'],
-      hunger: 0,
-      domainIds: [],
-      role: 'player',
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-      pillars: [],
-    );
+    id: telegramUsername,
+    characterName: profileRow['character_name'],
+    sect: profileRow['sect'],
+    clan: profileRow['clan'],
+    humanity: profileRow['humanity'],
+    disciplines: List<String>.from(profileRow['disciplines'] ?? []),
+    bloodPower: profileRow['blood_power'] ?? 0,
+    hunger: 0,
+    domainIds: [],
+    role: 'player',
+    createdAt: DateTime.now(),
+    updatedAt: DateTime.now(),
+    pillars: [], 
+    generation: profileRow['generation'] ?? 13,
+  );
   }
 
   Future<ProfileModel?> getProfileByTelegram(
     String username, {
     void Function(String)? debug,
   }) async {
-    final clean = username.trim().replaceFirst('@', '');
-    debug?.call('🔎 Ищем профиль по external_name="$clean"');
-
     try {
-      // 1. Сначала пробуем найти в таблице profiles
-      var profileData = await client
+      debug?.call('🔍 Поиск профиля по Telegram: @$username');
+
+      // Нормализуем username (убираем @ в начале если есть)
+      final normalizedUsername = username.startsWith('@') 
+          ? username.substring(1) 
+          : username;
+
+      debug?.call('📝 Нормализованный username: $normalizedUsername');
+
+      // Сначала ищем в таблице profiles
+      var response = await client
           .from('profiles')
           .select()
-          .eq('telegram_username', clean)
+          .ilike('external_name', normalizedUsername)
           .maybeSingle();
 
-      if (profileData != null) {
-        debug?.call('✅ Профиль найден в таблице profiles');
-        return ProfileModel.fromJson(profileData);
+      if (response != null) {
+        debug?.call('✅ Найден существующий профиль в таблице profiles');
+        return ProfileModel.fromJson(response);
       }
 
-      // 2. Если нет в profiles, ищем в predefined_profiles
-      profileData = await client
+      debug?.call('🔍 Поиск в predefined_profiles: @$normalizedUsername');
+      
+      // Ищем в predefined_profiles
+      final predefinedResponse = await client
           .from('predefined_profiles')
           .select()
-          .eq('external_name', clean)
+          .ilike('external_name', normalizedUsername)
           .maybeSingle();
 
-      if (profileData == null) {
-        debug?.call('❌ Профиль не найден');
-        return null;
+      if (predefinedResponse != null) {
+        debug?.call('✅ Найден predefined профиль, создаем новый профиль');
+
+        // Генерируем новый ID на основе максимального существующего ID
+        final maxIdResponse = await client
+            .from('profiles')
+            .select('id')
+            .order('id', ascending: false)
+            .limit(1)
+            .maybeSingle();
+
+        int newId = 1;
+        if (maxIdResponse != null && maxIdResponse['id'] != null) {
+          try {
+            final maxId = int.parse(maxIdResponse['id'].toString());
+            newId = maxId + 1;
+          } catch (e) {
+            debug?.call('⚠️ Ошибка парсинга максимального ID, начинаем с 1');
+          }
+        }
+
+        debug?.call('🆕 Сгенерирован новый ID: $newId');
+
+        // Создаем новый профиль на основе predefined_profiles
+        final newProfile = ProfileModel(
+          id: newId.toString(), // Используем сгенерированный ID
+          characterName: predefinedResponse['character_name'] ?? 'Безымянный',
+          sect: predefinedResponse['sect'] ?? 'Неизвестно',
+          clan: predefinedResponse['clan'] ?? 'Неизвестно',
+          humanity: predefinedResponse['humanity'] ?? 0,
+          disciplines: List<String>.from(predefinedResponse['disciplines'] ?? []),
+          bloodPower: predefinedResponse['blood_power'] ?? 0,
+          hunger: predefinedResponse['hunger'] ?? 0,
+          domainIds: List<int>.from(predefinedResponse['domain_ids'] ?? []),
+          role: predefinedResponse['role'] ?? 'user',
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          external_name: normalizedUsername,
+          adminInfluence: predefinedResponse['admin_influence'] ?? 0,
+          pillars: List<Map<String, dynamic>>.from(predefinedResponse['pillars'] ?? []), 
+          generation: predefinedResponse['generation'] ?? 13,
+        );
+
+        // Вставляем новый профиль
+        final insertResponse = await client
+            .from('profiles')
+            .insert(newProfile.toJson())
+            .select()
+            .single();
+
+        debug?.call('✅ Профиль создан успешно');
+        return ProfileModel.fromJson(insertResponse);
       }
 
-      // 3. Создаем профиль в таблице profiles
-      final predefinedProfile = ProfileModel.fromJson(profileData);
-      final newProfile = predefinedProfile.copyWith(
-        hunger: 5,
-        external_name: clean,
-      );
-
-      // Логируем создание профиля
-      debug?.call('Создаем новый профиль: ${newProfile.toJson()}');
-
-      final insertResponse = await client
-          .from('profiles')
-          .insert(newProfile.toJson())
-          .select()
-          .single();
-
-      debug?.call('✅ Профиль создан: ${insertResponse}');
-      return ProfileModel.fromJson(insertResponse);
-    } catch (e) {
-      debug?.call('❌ Ошибка при запросе: $e');
+      debug?.call('❌ Профиль не найден ни в profiles, ни в predefined_profiles');
+      return null;
+    } catch (e, stackTrace) {
+      debug?.call('❌ Ошибка при поиске профиля: $e\n$stackTrace');
       return null;
     }
   }
 
-  Future<void> createProfile(ProfileModel profile) async {
-    final json = profile.toJson();
-    await client.from('profiles').insert(json);
-  }
-
-  Future<void> updateProfile(ProfileModel profile) async {
-    await client.from('profiles').update(profile.toJson()).eq('id', profile.id);
-  }
-
+  // --- DOMAINS ---
   Future<List<DomainModel>> getDomains() async {
     try {
       final data = await client.from('domains').select();
-      final domains = (data as List)
-          .map((e) => DomainModel.fromJson(e))
-          .toList();
-
-      // Проверяем наличие нейтральной территории
-      final hasNeutral = domains.any((d) => d.isNeutral);
-
-      if (!hasNeutral) {
-        await sendDebugToTelegram('⚠️ В базе нет нейтральной территории');
-        domains.add(
-          DomainModel(
-            id: -1, // Специальное значение для нейтрального домена
-            name: 'Neutral Territory',
-            latitude: 0,
-            longitude: 0,
-            boundaryPoints: [],
-            isNeutral: true,
-            ownerId: 'нет',
-          ),
-        );
-      }
-
-      return domains;
+      return (data as List).map((e) => DomainModel.fromJson(e)).toList();
     } catch (e) {
       final errorMsg = '❌ Ошибка загрузки доменов: ${e.toString()}';
       print(errorMsg);
       await sendDebugToTelegram(errorMsg);
-
-      // Возвращаем нейтральную территорию как fallback
-      return [
-        DomainModel(
-          id: -1,
-          name: 'Neutral Territory',
-          latitude: 0,
-          longitude: 0,
-          boundaryPoints: [],
-          isNeutral: true,
-          ownerId: 'нет',
-        ),
-      ];
+      rethrow;
     }
   }
 
   Future<void> transferDomain(String domainId, String newOwnerId) async {
-    // Обновляем профиль нового владельца
-    await client
-        .from('profiles')
-        .update({'domain_ids': [int.parse(domainId)]}) // Изменено
-        .eq('id', newOwnerId);
-
-    // Обновляем профиль старого владельца
-    final oldOwner = await client
+  try {
+    // 1. Получаем текущего владельца домена
+    final domainData = await client
         .from('domains')
-        .select('owner_id')
-        .eq('id', domainId)
-        .single()
-        .then((data) => data['owner_id'] as String?);
+        .select('ownerId')
+        .eq('id', int.parse(domainId))
+        .single();
 
-    if (oldOwner != null) {
+    final oldOwnerId = domainData['ownerId'] as String?;
+
+    // 2. Обновляем домен: устанавливаем нового владельца и снимаем нейтральный статус
+    await client
+        .from('domains')
+        .update({ 
+          'ownerId': newOwnerId,
+          'isNeutral': false 
+        })
+        .eq('id', int.parse(domainId));
+
+    // 3. Обновляем профиль старого владельца (удаляем домен из domain_ids)
+    if (oldOwnerId != null && oldOwnerId.isNotEmpty) {
+      final oldOwnerData = await client
+          .from('profiles')
+          .select('domain_ids')
+          .eq('id', oldOwnerId)
+          .single();
+
+      List<int> oldDomainIds = List<int>.from(oldOwnerData['domain_ids'] ?? []);
+      oldDomainIds.remove(int.parse(domainId));
+
       await client
           .from('profiles')
-          .update({'domain_ids': []}) // Изменено
-          .eq('id', oldOwner);
+          .update({ 'domain_ids': oldDomainIds })
+          .eq('id', oldOwnerId);
+    }
+
+    // 4. Обновляем профиль нового владельца (добавляем домен в domain_ids)
+    final newOwnerData = await client
+        .from('profiles')
+        .select('domain_ids')
+        .eq('id', newOwnerId)
+        .single();
+
+    List<int> newDomainIds = List<int>.from(newOwnerData['domain_ids'] ?? []);
+    if (!newDomainIds.contains(int.parse(domainId))) {
+      newDomainIds.add(int.parse(domainId));
+    }
+
+    await client
+        .from('profiles')
+        .update({ 'domain_ids': newDomainIds })
+        .eq('id', newOwnerId);
+
+    sendDebugToTelegram('✅ Домен $domainId передан от $oldOwnerId к $newOwnerId');
+  } catch (e, stack) {
+    final errorMsg = '❌ Ошибка передачи домена: $e\n$stack';
+    sendDebugToTelegram(errorMsg);
+    rethrow;
+  }
+}
+
+  Future<ProfileModel?> updatePillars(String profileId, List<Map<String, dynamic>> pillars) async {
+  // Рассчитываем новую человечность
+  int newHumanity = pillars.length;
+
+  final updated = await client
+      .from('profiles')
+      .update({
+        'pillars': pillars,
+        'humanity': newHumanity, // Обновляем человечность
+        'updated_at': DateTime.now().toIso8601String(),
+      })
+      .eq('id', profileId)
+      .select()
+      .maybeSingle();
+  return updated == null ? null : ProfileModel.fromJson(updated);
+}
+
+  Future<List<ViolationModel>> getViolations() async {
+  try {
+    sendDebugToTelegram('⚡️ SQL: SELECT * FROM violations');
+    final data = await client.from('violations').select();
+
+    await sendDebugToTelegram(
+      '✅ Получено нарушений: ${data.length}\n'
+      'Первые 3: ${data.take(3).map((v) => v['id']).join(', ')}'
+    );
+
+    return (data as List).map((e) => ViolationModel.fromJson(e)).toList();
+  } catch (e) {
+    final errorMsg = '❌ Ошибка загрузки нарушений: ${e.toString()}';
+    print(errorMsg);
+    await sendDebugToTelegram(errorMsg);
+    rethrow;
+  }
+  }
+
+
+
+  Future<List<ViolationModel>> getViolationsByDomainId(int domainId) async {
+  await sendDebugToTelegram('🔍 SQL: SELECT * FROM violations WHERE domain_id = $domainId ORDER BY created_at DESC');
+
+  final response = await client
+      .from('violations')
+      .select()
+      .eq('domain_id', domainId)
+      .order('created_at', ascending: false);
+
+  await sendDebugToTelegram('📥 Ответ Supabase: $response');
+
+  final list = (response as List)
+      .map((json) => ViolationModel.fromJson(json))
+      .toList();
+
+  return list;
+}
+
+  Future<ViolationModel?> getViolationById(String id) async {
+    final data = await client
+        .from('violations')
+        .select()
+        .eq('id', id)
+        .maybeSingle();
+    return data == null ? null : ViolationModel.fromJson(data);
+  }
+
+  Future<DomainModel?> getDomainById(int id) async {
+    try {
+      final data =
+          await client.from('domains').select().eq('id', id).maybeSingle();
+      return data == null ? null : DomainModel.fromJson(data);
+    } catch (e) {
+      final errorMsg = '❌ Ошибка поиска домена $id: ${e.toString()}';
+      print(errorMsg);
+      await sendDebugToTelegram(errorMsg);
+      return null;
     }
   }
+
+Future<void> createViolation(ViolationModel violation) async {
+  try {
+    final json = violation.toJson();
+    json.remove('id');
+
+    await sendDebugToTelegram(
+      '💾 Сохранение нарушения в БД:\n'
+      '• Domain ID: ${violation.domainId}\n'
+      '• Description: ${violation.description}\n'
+      '• Coordinates: ${violation.latitude}, ${violation.longitude}\n'
+      '• JSON: $json'
+    );
+
+    await client.from('violations').insert(json);
+    await sendDebugToTelegram('✅ Нарушение успешно сохранено в БД');
+  } catch (e, stack) {
+    await sendDebugToTelegram('❌ Ошибка сохранения нарушения: $e\n$stack');
+    rethrow;
+  }
+}
 
   Future<String?> reportViolation(ViolationModel violation) async {
     final json = violation.toJson();
@@ -214,8 +356,8 @@ class SupabaseService {
         .from('violations')
         .insert(json)
         .select()
-        .single();
-    return inserted['id'] as String?;
+        .maybeSingle();
+    return inserted == null ? null : (inserted['id'] as String?);
   }
 
   Future<void> closeViolation(String violationId, String resolvedBy) async {
@@ -234,6 +376,21 @@ class SupabaseService {
         .from('violations')
         .update({'revealed': true})
         .eq('id', violationId);
+  }
+
+  Future<void> revealViolation({
+    required String id,
+    required String violatorName,
+    required String revealedAt,
+  }) async {
+    await client
+        .from('violations')
+        .update({
+          'status': 'revealed',
+          'violator_name': violatorName,
+          'revealed_at': revealedAt,
+        })
+        .eq('id', id);
   }
 
   Future<Map<String, dynamic>> hunt(String hunterId, String targetId) async {
@@ -262,138 +419,18 @@ class SupabaseService {
     );
   }
 
-  Future<List<ViolationModel>> getViolations() async {
-    try {
-      final data = await client.from('violations').select();
-
-      // Логирование количества полученных нарушений
-      print('✅ Получено нарушений: ${data.length}');
-      await sendDebugToTelegram('✅ Получено нарушений: ${data.length}');
-
-      return (data as List).map((e) => ViolationModel.fromJson(e)).toList();
-    } catch (e) {
-      final errorMsg = '❌ Ошибка загрузки нарушений: ${e.toString()}';
-      print(errorMsg);
-      await sendDebugToTelegram(errorMsg);
-      rethrow;
-    }
-  }
-
-  Future<ViolationModel?> getViolationById(String id) async {
-    final data = await client
-        .from('violations')
-        .select()
-        .eq('id', id)
-        .maybeSingle();
-    return data == null ? null : ViolationModel.fromJson(data);
-  }
-
-  Future<DomainModel?> getDomainById(int id) async {
-    if (id == null) {
-      print('⚠️ getDomainById вызван с пустым ID');
-      await sendDebugToTelegram('⚠️ getDomainById вызван с пустым ID');
-      return null;
-    }
-
-    try {
-      print('🔍 Поиск домена по ID: $id');
-      final data = await client
-          .from('domains')
-          .select()
-          .eq('id', id)
-          .maybeSingle();
-
-      if (data == null) {
-        print('❌ Домен с ID $id не найден');
-        await sendDebugToTelegram('❌ Домен с ID $id не найден');
-      }
-
-      return data == null ? null : DomainModel.fromJson(data);
-    } catch (e) {
-      final errorMsg = '❌ Ошибка поиска домена $id: ${e.toString()}';
-      print(errorMsg);
-      await sendDebugToTelegram(errorMsg);
-      return null;
-    }
-  }
-
-  Future<void> createViolation(ViolationModel violation) async {
-    try {
-      final json = violation.toJson();
-      json.remove('id');
-
-      await sendDebugToTelegram(
-        '📝 Финальный JSON для создания нарушения:\n$json',
-      );
-
-      await client.from('violations').insert(json);
-    } catch (e, stack) {
-      await sendDebugToTelegram('❌ Ошибка создания нарушения: $e\n$stack');
-      rethrow;
-    }
-  }
-
-  Future<ProfileModel?> updateHunger(String profileId, int hunger) async {
-  try {
-    // Гарантируем, что голод не может быть отрицательным
-    final clampedHunger = hunger < 0 ? 0 : hunger;
-
-    final response = await client
-        .from('profiles')
-        .update({'hunger': clampedHunger})
-        .eq('id', profileId)
-        .select()
-        .single();
-
-    return ProfileModel.fromJson(response);
-  } catch (e) {
-    print('❌ Ошибка обновления голода: $e');
-    return null;
-  }
-}
-
-  Future<void> revealViolation({
-    required String id,
-    required String violatorName,
-    required String revealedAt,
-  }) async {
-    await client
-        .from('violations')
-        .update({
-          'violator_known': true,
-          'violator_name': violatorName,
-          'revealed_at': revealedAt,
-          'status': 'revealed',
-        })
-        .eq('id', id);
-  }
-
-  Future<void> updateInfluence(String profileId, int influence) async {
-    await client
-        .from('profiles')
-        .update({'influence': influence})
-        .eq('id', profileId);
-  }
-
   Future<ProfileModel?> getProfileById(String id) async {
     try {
-      print('🔍 Getting profile by ID: $id');
-      final data = await client
+      final response = await client
           .from('profiles')
           .select()
           .eq('id', id)
           .maybeSingle();
 
-      if (data == null) {
-        print('❌ Profile not found for ID: $id');
-        return null;
-      }
-
-      final profile = ProfileModel.fromJson(data);
-      print('✅ Profile loaded: ${profile.characterName}');
-      return profile;
+      if (response == null) return null;
+      return ProfileModel.fromJson(response);
     } catch (e) {
-      print('❌ Error getting profile by ID: $e');
+      sendDebugToTelegram('❌ Ошибка получения профиля: $e');
       return null;
     }
   }
@@ -403,88 +440,319 @@ class SupabaseService {
     return (data as List).map((e) => ProfileModel.fromJson(e)).toList();
   }
 
-  Future<void> checkViolationsTable() async {
-    try {
-      // Просто запрашиваем одну запись, чтобы проверить доступность таблицы
-      final response = await client.from('violations').select().limit(1);
-      print('✅ Таблица violations существует');
-    } catch (e) {
-      print('❌ Таблица violations недоступна: ${e.toString()}');
-    }
+  Future<int?> updateHunger(String profileId, int hunger) async {
+  try {
+    await client
+        .from('profiles')
+        .update({'hunger': hunger})
+        .eq('id', profileId);
+    return hunger;
+  } catch (e, stack) {
+    final errorMsg = '❌ SupabaseService: Ошибка обновления голода: $e\n$stack';
+    sendDebugToTelegram(errorMsg);
+    return null;
+  }
+}
+
+  Future<void> updateInfluence(String profileId, int influence) async {
+    await client.from('profiles').update({'admin_influence': influence}).eq('id', profileId);
   }
 
-  Future<ProfileModel?> getCurrentProfile({
-    void Function(String)? debug,
-  }) async {
+  Future<void> updateDomainInfluence(int domainId, int newInfluence) async {
+    await client.from('domains').update({'admin_influence': newInfluence}).eq('id', domainId);
+  }
+
+
+  Future<void> createProfile(ProfileModel profile) async {
+    await client.from('profiles').insert(profile.toJson());
+  }
+
+  Future<ProfileModel?> updateProfile(ProfileModel profile) async {
     try {
-      final user = Supabase.instance.client.auth.currentUser;
-      if (user == null) {
-        debug?.call('❗ currentUser == null');
-        return null;
-      }
+      // Формируем данные для обновления
+      final updateData = {
+        'humanity': profile.humanity,
+        'pillars': profile.pillars,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
 
-      final data = await Supabase.instance.client
+      // Выполняем обновление
+      final response = await client
           .from('profiles')
-          .select()
-          .eq('id', user.id)
-          .maybeSingle();
+          .update(updateData)
+          .eq('id', profile.id)
+          .select();
 
-      if (data == null) {
-        debug?.call('❗ Профиль не найден для user.id=${user.id}');
-        return null;
-      }
+      if (response.isEmpty) return null;
 
-      return ProfileModel.fromJson(data);
+      return ProfileModel.fromJson(response.first);
     } catch (e) {
-      debug?.call('❌ Ошибка в getCurrentProfile: $e');
+      sendDebugToTelegram('❌ Ошибка обновления профиля: $e');
       return null;
     }
   }
 
-  Future<void> updateDomainInfluence(int domainId, int newInfluence) async {
-    try {
+  Future<void> updateDomainSecurity(int domainId, int newSecurity) async {
+  try {
+    sendDebugToTelegram('🛡️ Обновление защиты домена $domainId на $newSecurity');
+
+    // Обновляем защиту
+    await client
+        .from('domains')
+        .update({'securityLevel': newSecurity})
+        .eq('id', domainId);
+
+    sendDebugToTelegram('✅ Защита домена $domainId обновлена на $newSecurity');
+
+    // Если защита стала 0, устанавливаем флаг isNeutral
+    if (newSecurity == 0) {
+      sendDebugToTelegram('🔄 Защита стала 0, устанавливаем isNeutral=true');
+      await setDomainNeutralFlag(domainId, true);
+      
+      // Также очищаем владельца домена, используя NULL
       await client
           .from('domains')
-          .update({'admin_influence': newInfluence})
+          .update({'ownerId': null})  // Используем NULL вместо пустой строки
           .eq('id', domainId);
-    } catch (e) {
-      print('❌ Ошибка обновления влияния домена: $e');
-      rethrow;
+          
+      sendDebugToTelegram('✅ Владелец домена $domainId очищен (установлен в NULL)');
     }
+  } catch (e) {
+    sendDebugToTelegram('❌ Ошибка обновления защиты домена $domainId: $e');
+    rethrow;
   }
+}
 
-  Future<String> uploadMedia(
-    Uint8List bytes,
-    String fileName,
-    {required String fileType}
-  ) async {
-    try {
-      await client.storage
-        .from('carpet_chat_media')
-        .uploadBinary(
-          fileName,
-          bytes,
-        );
+Future<void> setDomainNeutral(int domainId) async {
+  try {
+    sendDebugToTelegram('🔄 Нейтрализация домена $domainId');
 
-      return client.storage
-        .from('carpet_chat_media')
-        .getPublicUrl(fileName);
-    } catch (e) {
-      throw Exception('Ошибка загрузки: $e');
+    // Получаем текущего владельца домена
+    final domainData = await client
+        .from('domains')
+        .select('ownerId')
+        .eq('id', domainId)
+        .single();
+
+    final ownerId = domainData['ownerId'] as String?;
+
+    // Обновляем домен: делаем нейтральным и сбрасываем владельца
+    await client
+        .from('domains')
+        .update({
+          'isNeutral': true,
+          'ownerId': '',
+        })
+        .eq('id', domainId);
+
+    sendDebugToTelegram('✅ Домен $domainId помечен как нейтральный');
+
+    // Если у домена был владелец, убираем domainId из его domain_ids
+    if (ownerId != null && ownerId.isNotEmpty) {
+      final profileData = await client
+          .from('profiles')
+          .select('domain_ids')
+          .eq('id', ownerId)
+          .single();
+
+      List<int> domainIds = List<int>.from(profileData['domain_ids'] ?? []);
+      if (domainIds.contains(domainId)) {
+        domainIds.remove(domainId);
+        
+        await client
+            .from('profiles')
+            .update({'domain_ids': domainIds})
+            .eq('id', ownerId);
+
+        sendDebugToTelegram('✅ Домен $domainId удален из списка владельца $ownerId');
+      }
     }
+  } catch (e) {
+    sendDebugToTelegram('❌ Ошибка при нейтрализации домена $domainId: $e');
+    rethrow;
   }
+}
 
-  Future<List<DomainModel>> getUserDomains(String userId) async {
-    try {
-      final data = await client
-          .from('domains')
-          .select()
-          .eq('owner_id', userId);
-      
-      return (data as List).map((e) => DomainModel.fromJson(e)).toList();
-    } catch (e) {
-      sendDebugToTelegram('Ошибка получения доменов пользователя: $e');
-      return [];
-    }
+Future<void> updateDomainMaxSecurity(int domainId, int newMaxSecurity) async {
+  await client.from('domains').update({
+    'max_security_level': newMaxSecurity,
+    'updated_at': DateTime.now().toIso8601String(),
+  }).eq('id', domainId);
+}
+
+Future<void> incrementDomainViolationsCount(int domainId) async {
+  // Получаем текущее количество нарушений
+  final domain = await getDomainById(domainId);
+  if (domain != null) {
+    final newViolationsCount = domain.openViolationsCount + 1;
+    
+    // Обновляем счетчик нарушений
+    await client.from('domains').update({
+      'open_violations_count': newViolationsCount,
+      'updated_at': DateTime.now().toIso8601String(),
+    }).eq('id', domainId);
   }
+}
+
+Future<void> updateDomainInfluenceLevel(int domainId, int newInfluence) async {
+  try {
+    // Простое обновление без сложной логики
+    await client.from('domains').update({
+      'influenceLevel': newInfluence,
+    }).eq('id', domainId);
+  } catch (e) {
+    rethrow;
+  }
+}
+
+Future<void> forceDomainNeutralization(int domainId) async {
+  try {
+    sendDebugToTelegram('🔄 Принудительная нейтрализация домена $domainId');
+
+    // Получаем текущего владельца домена
+    final domainData = await client
+        .from('domains')
+        .select('ownerId, name')
+        .eq('id', domainId)
+        .single();
+
+    final ownerId = domainData['ownerId'] as String?;
+    final domainName = domainData['name'] as String? ?? 'Неизвестный домен';
+
+    // Немедленно устанавливаем домен как нейтральный
+    await client
+        .from('domains')
+        .update({
+          'isNeutral': true,
+          'ownerId': null,
+          'securityLevel': 0,
+        })
+        .eq('id', domainId);
+
+    sendDebugToTelegram('✅ Домен $domainId принудительно помечен как нейтральный');
+
+    // Если у домена был владелец, убираем domainId из его domain_ids
+    if (ownerId != null && ownerId.isNotEmpty) {
+      final profileData = await client
+          .from('profiles')
+          .select('domain_ids')
+          .eq('id', ownerId)
+          .single();
+
+      List<int> domainIds = List<int>.from(profileData['domain_ids'] ?? []);
+      if (domainIds.contains(domainId)) {
+        domainIds.remove(domainId);
+        
+        await client
+            .from('profiles')
+            .update({'domain_ids': domainIds})
+            .eq('id', ownerId);
+
+        sendDebugToTelegram('✅ Домен $domainId удален из списка владельца $ownerId');
+        
+        // Отправляем уведомление
+        await sendDomainNeutralizedNotification(ownerId, domainName, domainId);
+      }
+    }
+  } catch (e) {
+    sendDebugToTelegram('❌ Ошибка при принудительной нейтрализации домена $domainId: $e');
+    rethrow;
+  }
+}
+
+Future<void> updateDomainSecurityAndInfluence(int domainId, int newSecurity, int newInfluence) async {
+  try {
+    sendDebugToTelegram('🔄 Обновление защиты и влияния домена $domainId: защита=$newSecurity, влияние=$newInfluence');
+
+    // Обновляем защиту и влияние
+    await client
+        .from('domains')
+        .update({
+          'securityLevel': newSecurity,
+          'influenceLevel': newInfluence,
+        })
+        .eq('id', domainId);
+
+    sendDebugToTelegram('✅ Защита и влияние домена $domainId обновлены');
+
+    // Если защита стала 0, вызываем принудительную нейтрализацию
+    if (newSecurity == 0) {
+      sendDebugToTelegram('🔄 Защита стала 0, запускаем принудительную нейтрализацию');
+      await forceDomainNeutralization(domainId);
+    }
+  } catch (e) {
+    sendDebugToTelegram('❌ Ошибка обновления защиты и влияния домена $domainId: $e');
+    rethrow;
+  }
+}
+
+Future<void> updateDomainMaxSecurityAndInfluence(int domainId, int newMaxSecurity, int newInfluence) async {
+  try {
+    sendDebugToTelegram('🔄 Атомарное обновление макс. защиты и влияния домена $domainId: макс. защита=$newMaxSecurity, влияние=$newInfluence');
+    
+    // Используем транзакцию для атомарного обновления
+    final response = await client.from('domains').update({
+      'max_security_level': newMaxSecurity,
+      'influenceLevel': newInfluence,
+      'updated_at': DateTime.now().toIso8601String(),
+    }).eq('id', domainId);
+    
+    if (response.error != null) {
+      throw Exception('Supabase error: ${response.error.message}');
+    }
+    
+    sendDebugToTelegram('✅ Атомарное обновление макс. защиты завершено: домен $domainId');
+  } catch (e, stack) {
+    final errorMsg = '❌ Ошибка атомарного обновления макс. защиты домена $domainId: ${e.toString()}\n${stack.toString()}';
+    sendDebugToTelegram(errorMsg);
+    rethrow;
+  }
+}
+
+Future<void> updateDomainBaseIncome(int domainId, int newBaseIncome) async {
+  await client
+      .from('domains')
+      .update({'base_income': newBaseIncome})
+      .eq('id', domainId);
+}
+
+Future<void> setDomainNeutralFlag(int domainId, bool isNeutral) async {
+  try {
+    sendDebugToTelegram('🔄 Установка флага isNeutral=$isNeutral для домена $domainId');
+
+    await client
+        .from('domains')
+        .update({
+          'isNeutral': isNeutral,
+          'ownerId': isNeutral ? null : '', // Для нейтральных доменов используем NULL
+        })
+        .eq('id', domainId);
+
+    sendDebugToTelegram('✅ Флаг isNeutral=$isNeutral установлен для домена $domainId');
+  } catch (e) {
+    sendDebugToTelegram('❌ Ошибка установки флага isNeutral для домена $domainId: $e');
+    rethrow;
+  }
+}
+
+Future<void> sendDomainNeutralizedNotification(String userId, String domainName, int domainId) async {
+  try {
+    // Вызываем Supabase Edge Function для отправки уведомления
+    final response = await client.rpc('send_push_notification', params: {
+      'user_id': userId,
+      'title': 'Домен стал нейтральным',
+      'message': 'Домен "$domainName" стал нейтральным из-за нулевой защиты',
+      'data': {
+        'type': 'domain_neutralized',
+        'domain_id': domainId,
+        'domain_name': domainName,
+      }
+    });
+
+    sendDebugToTelegram('✅ Уведомление отправлено пользователю $userId о домене $domainName');
+  } catch (e) {
+    sendDebugToTelegram('❌ Ошибка отправки уведомления: $e');
+  }
+}
+
 }

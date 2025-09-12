@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:masquarade_app/blocs/domain/domain_bloc.dart';
+import 'package:masquarade_app/blocs/domain/domain_event.dart';
 import 'package:masquarade_app/blocs/profile/profile_bloc.dart';
 import 'package:masquarade_app/utils/debug_telegram.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../models/violation_model.dart';
@@ -16,34 +20,75 @@ part 'masquerade_event.dart';
 part 'masquerade_state.dart';
 
 class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
+  final DomainBloc domainBloc;
   final SupabaseRepository repository;
-  final ProfileModel currentProfile;
+  ProfileModel currentProfile;
   final Random _random = Random();
   final Uuid _uuid = const Uuid();
   final ProfileBloc profileBloc;
+  StreamSubscription? _profileSubscription;
+  late final SharedPreferences prefs;
 
   MasqueradeBloc({
     required this.repository,
     required this.currentProfile,
     required this.profileBloc,
-  }) : super(ViolationsLoading()) {
+    required this.domainBloc,
+    List<ViolationModel>? cachedViolations,
+  }) : super(cachedViolations != null ? ViolationsLoaded(cachedViolations) : ViolationsLoading()) {
+    // Инициализация SharedPreferences
+    _initPrefs();
+
+    // Подписка на обновления профиля
+    _profileSubscription = profileBloc.stream.listen((state) {
+      if (state is ProfileLoaded) {
+        currentProfile = state.profile;
+      }
+    });
+
     on<LoadViolations>(_onLoadViolations);
+    on<LoadViolationsForDomain>(_onLoadViolationsForDomain);
     on<ReportViolation>(_onReportViolation);
     on<StartHunt>(_onStartHunt);
     on<CloseViolation>(_onCloseViolation);
     on<RevealViolator>(_onRevealViolator);
+    on<UpdateCurrentProfile>((event, emit) {
+  currentProfile = event.profile;
+});
+  }
+
+  Future<void> _initPrefs() async {
+    prefs = await SharedPreferences.getInstance();
+  }
+
+  @override
+  Future<void> close() {
+    _profileSubscription?.cancel();
+    return super.close();
   }
 
   Future<void> _onLoadViolations(
     LoadViolations event,
     Emitter<MasqueradeState> emit,
   ) async {
-    emit(ViolationsLoading());
+    if (state is! ViolationsLoaded) {
+      emit(ViolationsLoading());
+    }
+
     try {
+      sendDebugToTelegram('📡 Запрос нарушений из базы данных...');
       final list = await repository.getViolations();
+
+      // Сохраняем нарушения в кеш
+      final jsonString = jsonEncode(list.map((e) => e.toJson()).toList());
+      await prefs.setString('cachedViolations', jsonString);
+      sendDebugToTelegram('💾 Нарушения сохранены в кеш (${list.length})');
+
       await sendDebugToTelegram(
-        '✅ Нарушения успешно загружены\nКоличество: ${list.length}',
+        '✅ Нарушения успешно загружены\nКоличество: ${list.length}\n'
+        'Примеры: ${list.take(3).map((v) => '${v.id}: ${v.description}').join('\n')}'
       );
+
       emit(ViolationsLoaded(list));
     } catch (e) {
       final errorMsg = '❌ Ошибка загрузки нарушений: ${e.toString()}';
@@ -53,11 +98,44 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
     }
   }
 
+
+  Future<void> _onLoadViolationsForDomain(
+  LoadViolationsForDomain event,
+  Emitter<MasqueradeState> emit,
+) async {
+  emit(ViolationsLoading());
+  await sendDebugToTelegram(
+    '🚀 Запрос нарушений для домена ID: ${event.domainId}',
+  );
+  try {
+    final list = await repository.getViolationsByDomainId(event.domainId);
+    await sendDebugToTelegram(
+      '📦 Получено нарушений: ${list.length}\n'
+      '${list.isNotEmpty ? "🔹 Первое: ${list.first.toJson()}" : "Список пуст"}',
+    );
+    emit(ViolationsLoaded(list));
+  } catch (e) {
+    await sendDebugToTelegram(
+      '❌ Ошибка при получении нарушений для домена ${event.domainId}: $e',
+    );
+    emit(ViolationsError('Ошибка загрузки нарушений'));
+  }
+}
+
   Future<void> _onReportViolation(
     ReportViolation event,
     Emitter<MasqueradeState> emit,
   ) async {
     try {
+      // Проверка на максимальный голод
+      if (currentProfile.hunger + event.hungerSpent > 5) {
+        emit(const ViolationsError('max_hunger_exceeded'));
+        await sendDebugToTelegram(
+          '❌ Создание нарушения отменено: голод превысит максимум}'
+        );
+        return;
+      }
+
       await _createViolation(
         description: event.description,
         hungerSpent: event.hungerSpent,
@@ -73,79 +151,96 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
     }
   }
 
-  Future<void> _onStartHunt(
+
+Future<void> _onStartHunt(
   StartHunt event,
   Emitter<MasqueradeState> emit,
 ) async {
   try {
-    final domainDebugInfo = 'Домен: ${event.domainId}';
-
-    await sendDebugToTelegram(
-      '🔍 Начата охота\n'
-      'Игрок: ${currentProfile.characterName} (${currentProfile.id})\n'
-      '$domainDebugInfo\n'
-      'Владелец домена: ${event.isDomainOwner ? "Да" : "Нет"}\n'
-      'Текущий голод: ${currentProfile.hunger}\n'
-      'Позиция: ${event.position.latitude}, ${event.position.longitude}',
-    );
-
-    // Проверяем, что голод > 0
-    if (currentProfile.hunger <= 0) {
-      final message = '❌ Охота отменена: голод уже утолён';
-      await sendDebugToTelegram(message);
-      emit(const ViolationsError('Ваш голод утолён, охотиться незачем.'));
+    // Получаем свежий профиль напрямую из базы
+    final freshProfile = await repository.getProfileById(currentProfile.id);
+    if (freshProfile == null) {
+      await sendDebugToTelegram('❌ Профиль не найден для охоты: ${currentProfile.id}');
+      emit(const ViolationsError('Профиль не найден'));
       return;
     }
 
-    final newHunger = currentProfile.hunger - 1;
-    // Гарантируем, что голод не станет отрицательным
-    final clampedHunger = newHunger > 0 ? newHunger : 0;
-    await repository.updateHunger(currentProfile.id, clampedHunger);
+    final currentHunger = freshProfile.hunger;
 
-    final violationProbability = event.isDomainOwner ? 0.25 : 0.5;
-    final violationOccurs = _random.nextDouble() < violationProbability;
-
-    String huntResultMessage = '✅ Охота успешна! Восстановлен 1 пункт голода';
-    String violationMessage = '';
-    int costToClose = 0;
-
-    if (violationOccurs) {
-      costToClose = event.isDomainOwner ? 1 : 2;
-
-      await sendDebugToTelegram(
-        '⚠️ Создаем нарушение с параметрами:\n'
-        'Violator ID: ${currentProfile.id}\n'
-        'Domain ID: ${event.domainId}\n'
-        'Cost to close: $costToClose\n'
-        'Lat/Lng: ${event.position.latitude}, ${event.position.longitude}',
-      );
-
-      await _createViolation(
-        description: 'Неосторожная охота',
-        hungerSpent: 1,
-        latitude: event.position.latitude,
-        longitude: event.position.longitude,
-        domainId: event.domainId,
-        emit: emit, isHunt: true,
-      );
+    // Проверяем, что голод > 0
+    if (currentHunger <= 0) {
+      final message = '❌ Охота отменена: голод уже утолён';
+      await sendDebugToTelegram(message);
+      emit(const ViolationsError('hunt_with_zero_hunger'));
+      return;
     }
 
-    await sendDebugToTelegram(huntResultMessage + violationMessage);
-    add(LoadViolations());
+    final newHunger = currentHunger - 1;
+    final clampedHunger = newHunger > 0 ? newHunger : 0;
 
-    emit(
-      HuntCompleted(
-        violationOccurred: violationOccurs,
-        isDomainOwner: event.isDomainOwner,
-        costToClose: violationOccurs ? costToClose : 0,
-      ),
+    // Обновляем голод в базе
+    final updatedHunger = await repository.updateHunger(
+      freshProfile.id,
+      clampedHunger
     );
-  } catch (e) {
-    final errorDetails = '❌ Ошибка во время охоты: ${e.toString()}';
-    await sendDebugToTelegram(errorDetails);
-    emit(ViolationsError(errorDetails));
+
+    if (updatedHunger != null) {
+      // Обновляем ProfileBloc
+      profileBloc.add(UpdateHunger(updatedHunger));
+      await sendDebugToTelegram('✅ Голод обновлён: $clampedHunger');
+    } else {
+      await sendDebugToTelegram('❌ Не удалось обновить голод');
+    }
+
+      final violationProbability = event.isDomainOwner ? 0.25 : 0.5;
+      final violationOccurs = _random.nextDouble() < violationProbability;
+
+      String huntResultMessage = '✅ Охота завершена';
+      String violationMessage = '';
+      int costToClose = 0;
+
+      if (violationOccurs) {
+        costToClose = event.isDomainOwner ? 1 : 2;
+
+        await sendDebugToTelegram(
+          '⚠️ Создаем нарушение с параметрами:\n'
+          'Violator ID: ${currentProfile.id}\n'
+          'Domain ID: ${event.domainId}\n'
+          'Cost to close: $costToClose\n'
+          'Lat/Lng: ${event.position.latitude}, ${event.position.longitude}',
+        );
+
+        await _createViolation(
+          description: 'Неосторожная охота',
+          hungerSpent: 1,
+          latitude: event.position.latitude,
+          longitude: event.position.longitude,
+          domainId: event.domainId,
+          emit: emit,
+          isHunt: true,
+        );
+
+        violationMessage = '\n⚠️ Нарушение было зафиксировано';
+      }
+
+      await sendDebugToTelegram(huntResultMessage + violationMessage);
+      // Обновляем список нарушений после охоты
+      add(LoadViolationsForDomain(event.domainId));
+
+      emit(
+        HuntCompleted(
+          violationOccurred: violationOccurs,
+          isDomainOwner: event.isDomainOwner,
+          costToClose: violationOccurs ? costToClose : 0,
+          newHunger: clampedHunger, // Добавляем новый уровень голода
+        ),
+      );
+    } catch (e, stack) {
+      final errorDetails = '❌ Ошибка во время охоты: ${e.toString()}\n$stack';
+      await sendDebugToTelegram(errorDetails);
+      emit(ViolationsError(errorDetails));
+    }
   }
-}
 
   Future<void> _onCloseViolation(
     CloseViolation event,
@@ -170,7 +265,7 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
       }
 
       // Используем только влияние домена
-      final domainInfluence = domain.totalInfluence;
+      final domainInfluence = domain.influenceLevel;
       if (domainInfluence < violation.costToClose) {
         emit(
           ViolationsError(
@@ -190,7 +285,8 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
 
       await repository.closeViolation(violation.id, currentProfile.id);
 
-      add(LoadViolations());
+      // Обновляем список нарушений для этого домена
+      add(LoadViolationsForDomain(domain.id));
       emit(ViolationClosedSuccessfully());
     } catch (e) {
       emit(ViolationsError('Ошибка при закрытии нарушения: ${e.toString()}'));
@@ -213,11 +309,6 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
         return;
       }
 
-      if (!violation.canBeRevealed) {
-        emit(ViolationsError('Слишком поздно раскрывать нарушителя'));
-        return;
-      }
-
       final violatorProfile = await repository.getProfileById(
         violation.violatorId,
       );
@@ -233,7 +324,7 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
       }
 
       // Используем только влияние домена
-      final domainInfluence = domain.totalInfluence;
+      final domainInfluence = domain.influenceLevel;
       if (domainInfluence < violation.costToReveal) {
         emit(
           ViolationsError(
@@ -257,7 +348,8 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
         revealedAt: DateTime.now().toIso8601String(),
       );
 
-      add(LoadViolations());
+      // Обновляем список нарушений для этого домена
+      add(LoadViolationsForDomain(domain.id));
       emit(ViolatorRevealedSuccessfully());
     } catch (e) {
       emit(ViolationsError('Ошибка при раскрытии нарушителя: ${e.toString()}'));
@@ -265,60 +357,122 @@ class MasqueradeBloc extends Bloc<MasqueradeEvent, MasqueradeState> {
   }
 
   Future<void> _createViolation({
-    required String description,
-    required int hungerSpent,
-    required double latitude,
-    required double longitude,
-    required int domainId,
-    required bool isHunt, // Определяет тип нарушения (охота/ручное)
-    required Emitter<MasqueradeState> emit,
-  }) async {
-    final id = _uuid.v4();
+  required String description,
+  required int hungerSpent,
+  required double latitude,
+  required double longitude,
+  required int domainId,
+  required bool isHunt,
+  required Emitter<MasqueradeState> emit,
+}) async {
+  final id = _uuid.v4();
 
-    await sendDebugToTelegram(
-      '🚨 Нарушение маскарада\n'
-      'Игрок: ${currentProfile.characterName} (${currentProfile.id})\n'
-      'Описание: $description\n'
-      'Голод: $hungerSpent\n'
-      'Тип: ${isHunt ? "Охота" : "Ручное"}\n'
-      'Домен: $domainId\n'
-      'Координаты: $latitude, $longitude',
+  await sendDebugToTelegram(
+    '🚨 Нарушение маскарада\n'
+    'Игрок: ${currentProfile.characterName} (${currentProfile.id})\n'
+    'Описание: $description\n'
+    'Голод: $hungerSpent\n'
+    'Тип: ${isHunt ? "Охота" : "Ручное"}\n'
+    'Домен: $domainId\n'
+    'Координаты: $latitude, $longitude',
+  );
+
+  final violation = ViolationModel(
+    id: id,
+    violatorId: currentProfile.id,
+    violatorName: null,
+    domainId: domainId,
+    description: description,
+    hungerSpent: hungerSpent,
+    costToClose: hungerSpent * 2,
+    costToReveal: hungerSpent,
+    status: ViolationStatus.open,
+    violatorKnown: false,
+    createdAt: DateTime.now(),
+    latitude: latitude,
+    longitude: longitude,
+    closedAt: null,
+    revealedAt: null,
+    resolvedBy: null,
+  );
+
+  await repository.createViolation(violation);
+
+  // Уменьшаем защиту домена на 1
+try {
+  final domain = await repository.getDomainById(domainId);
+  if (domain != null && !domain.isNeutral) {
+    int newSecurity = domain.securityLevel - 1;
+
+    // Защита не может быть отрицательной
+    if (newSecurity < 0) newSecurity = 0;
+
+    sendDebugToTelegram(
+      '🛡️ Обновление защиты домена ${domain.id}: ${domain.securityLevel} -> $newSecurity'
     );
 
-    final violation = ViolationModel(
-      id: id,
-      violatorId: currentProfile.id,
-      violatorName: null,
-      domainId: domainId,
-      description: description,
-      hungerSpent: hungerSpent,
-      costToClose: hungerSpent * 2,
-      costToReveal: hungerSpent,
-      status: ViolationStatus.open,
-      violatorKnown: false,
-      createdAt: DateTime.now(),
-      latitude: latitude,
-      longitude: longitude,
-      closedAt: null,
-      revealedAt: null,
-      resolvedBy: null,
-    );
+    // Обновляем защиту домена в базе данных
+    await repository.updateDomainSecurity(domainId, newSecurity);
 
-    await repository.createViolation(violation);
+    // Если защита стала 0, принудительно устанавливаем флаг нейтральности
+    if (newSecurity == 0) {
+  sendDebugToTelegram('🔄 Защита домена ${domain.id} стала 0, принудительно устанавливаем isNeutral=true');
+  await repository.setDomainNeutralFlag(domainId, true);
 
-    // Только для ручных нарушений увеличиваем голод
-    if (!isHunt) {
-      final newHunger = currentProfile.hunger + hungerSpent;
-      final updatedProfile = await repository.updateHunger(
-        currentProfile.id,
-        newHunger,
+  // Отправляем уведомление владельцу домена
+  if (domain.ownerId.isNotEmpty) {
+    final ownerProfile = await repository.getProfileById(domain.ownerId);
+    if (ownerProfile != null && ownerProfile.telegramChatId != null) {
+      final message = 
+        '⚠️ ВАЖНО: Домен "${domain.name}" стал нейтральным!\n'
+        'Защита домена упала до 0 из-за нарушения Маскарада. Вы больше не контролируете эту территорию.';
+      
+      await sendTelegramMessageDirect(
+        ownerProfile.telegramChatId!,
+        message,
       );
-      if (updatedProfile != null) {
-        profileBloc.add(UpdateProfile(updatedProfile));
-      }
+      
+      sendDebugToTelegram('✅ Уведомление о нейтрализации отправлено владельцу домена ${domain.name}');
     }
-
-    add(LoadViolations());
-    emit(ViolationReportedSuccessfully());
   }
+
+  // Принудительно обновляем список доменов
+  domainBloc.add(LoadDomains());
+
+  // Обновляем профиль владельца через profileBloc
+  if (domain.ownerId != null && domain.ownerId.isNotEmpty) {
+    final ownerProfile = await repository.getProfileById(domain.ownerId);
+    if (ownerProfile != null) {
+      profileBloc.add(SetProfile(ownerProfile));
+      sendDebugToTelegram('👤 Профиль владельца ${domain.ownerId} обновлен');
+    }
+  }
+}
+
+    // Уведомляем DomainBloc об изменении защиты
+    domainBloc.add(UpdateDomainSecurity(domainId, newSecurity));
+
+    // Увеличиваем счетчик открытых нарушений
+    await repository.incrementDomainViolationsCount(domainId);
+  }
+} catch (e) {
+  sendDebugToTelegram('❌ Ошибка при обновлении защиты домена: $e');
+}
+
+  // Только для ручных нарушений увеличиваем голод
+  if (!isHunt) {
+    final newHunger = currentProfile.hunger + hungerSpent;
+    final updatedHunger = await repository.updateHunger(
+      currentProfile.id,
+      newHunger,
+    );
+    if (updatedHunger != null) {
+      profileBloc.add(UpdateHunger(updatedHunger));
+    }
+  }
+
+  // После создания — обновляем список нарушений для домена
+  add(LoadViolationsForDomain(domainId));
+  emit(ViolationReportedSuccessfully());
+}
 }

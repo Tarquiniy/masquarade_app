@@ -152,16 +152,17 @@ class ViolationModel {
   bool get isClosed => status == ViolationStatus.closed;
   bool get isRevealed => status == ViolationStatus.revealed;
   bool get canBeRevealed {
-    final now = DateTime.now();
-    // Добавляем проверку, что нарушение еще не было раскрыто или закрыто
-    return !isRevealed && !isClosed && now.difference(createdAt).inHours <= 24;
-  }
+  // Раскрыть можно только открытые нарушения в течение 24 часов
+  final now = DateTime.now();
+  return status == ViolationStatus.open && now.difference(createdAt).inHours <= 24;
+}
 
   // Добавляем новый геттер для проверки возможности закрытия
   bool get canBeClosed {
-    // Закрыть можно только открытые нарушения
-    return status == ViolationStatus.open;
-  }
+  // Закрыть можно открытые и раскрытые нарушения
+  return status == ViolationStatus.open || status == ViolationStatus.revealed;
+}
+
 
   LatLng get position => LatLng(latitude, longitude);
 }

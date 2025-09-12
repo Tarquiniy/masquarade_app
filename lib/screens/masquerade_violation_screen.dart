@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:masquarade_app/blocs/domain/domain_bloc.dart';
 import 'package:masquarade_app/blocs/domain/domain_event.dart';
 import 'package:masquarade_app/blocs/domain/domain_state.dart';
-
-import '../blocs/domain/domain_bloc.dart';
-import '../blocs/masquerade/masquerade_bloc.dart';
-import '../models/domain_model.dart';
-import '../models/profile_model.dart';
-import '../utils/debug_telegram.dart';
+import 'package:masquarade_app/blocs/masquerade/masquerade_bloc.dart';
+import 'package:masquarade_app/models/domain_model.dart';
+import 'package:masquarade_app/models/profile_model.dart';
+import 'package:masquarade_app/utils/debug_telegram.dart';
 
 class MasqueradeViolationScreen extends StatefulWidget {
   final ProfileModel profile;
@@ -27,6 +26,7 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
   int _hungerSpent = 1;
   final TextEditingController _descriptionController = TextEditingController();
   bool _submitting = false;
+  List<DomainModel> _allDomains = [];
 
   @override
   void initState() {
@@ -41,70 +41,101 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
     }
   }
 
-  Future<void> _loadPositionAndDomain() async {
-    final domainBloc = context.read<DomainBloc>();
+ Future<void> _loadPositionAndDomain() async {
+    setState(() => _submitting = true);
 
-    if (domainBloc.state is! DomainsLoaded) {
-      domainBloc.add(LoadDomains());
-      await Future.delayed(const Duration(milliseconds: 300));
-    }
+    try {
+      // Загружаем все домены напрямую из репозитория
+      final repository = context.read<DomainBloc>().repository;
+      _allDomains = await repository.getDomains();
+      sendDebugToTelegram('📦 Загружено ${_allDomains.length} доменов');
 
-    final pos = await Geolocator.getCurrentPosition();
-    final domainState = context.read<DomainBloc>().state;
-
-    DomainModel? foundDomain;
-
-    if (domainState is DomainsLoaded) {
-      for (final domain in domainState.domains) {
-        if (domain.isPointInside(pos.latitude, pos.longitude)) {
-          foundDomain = domain;
-          break;
-        }
+      // Получаем текущую позицию
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        await Geolocator.requestPermission();
       }
 
-      foundDomain ??= domainState.domains.firstWhere(
-        (d) => d.isNeutral,
-        orElse: () => DomainModel(
-          id: -1,
-          name: 'Нейтральная зона',
-          latitude: 0,
-          longitude: 0,
-          boundaryPoints: [],
-          isNeutral: true,
-          openViolationsCount: 0,
-          ownerId: 'нет',
-        ),
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.best,
       );
+
+      // Определяем домен по координатам
+      final domain = _findDomainByCoordinates(pos.latitude, pos.longitude, _allDomains);
+
+      setState(() {
+        _position = pos;
+        _domain = domain;
+      });
+
+      sendDebugToTelegram(
+        '📍 Позиция: ${pos.latitude}, ${pos.longitude}\n'
+        '🏰 Определён домен: ${domain.name} (ID: ${domain.id})'
+      );
+
+    } catch (e) {
+      sendDebugToTelegram('❌ Ошибка загрузки позиции и домена: $e');
+    } finally {
+      setState(() => _submitting = false);
+    }
+  }
+
+  DomainModel _findDomainByCoordinates(double lat, double lng, List<DomainModel> domains) {
+    sendDebugToTelegram('🔍 Поиск домена для координат: $lat, $lng');
+
+    // Сначала ищем в не-нейтральных доменах
+    for (final domain in domains) {
+      if (!domain.isNeutral && domain.isPointInside(lat, lng)) {
+        sendDebugToTelegram('✅ Найден не-нейтральный домен: ${domain.name} (ID: ${domain.id})');
+        return domain;
+      }
     }
 
-    setState(() {
-      _position = pos;
-      _domain = foundDomain;
-    });
+    // Если не найден в обычных доменах, ищем нейтральный
+    for (final domain in domains) {
+      if (domain.isNeutral && domain.isPointInside(lat, lng)) {
+        sendDebugToTelegram('🌐 Найден нейтральный домен: ${domain.name} (ID: ${domain.id})');
+        return domain;
+      }
+    }
+
+    // Если ничего не найдено, создаём временный нейтральный домен
+    sendDebugToTelegram('⚠️ Домен не найден, создаём временный нейтральный');
+    return DomainModel(
+      id: 4,
+      name: 'Нейтральная территория',
+      latitude: lat,
+      longitude: lng,
+      boundaryPoints: [],
+      isNeutral: true,
+      openViolationsCount: 0,
+      ownerId: '',
+    );
   }
 
   void _submitViolation() async {
-    print('🔥 Кнопка "Пусть всё горит!" нажата');
-
     final desc = _descriptionController.text.trim();
 
     if (desc.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Введите описание')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Введите описание')));
       return;
     }
 
     if (_position == null || _domain == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Геолокация не определена')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Геолокация не определена')));
       return;
     }
 
     setState(() => _submitting = true);
 
     try {
+      sendDebugToTelegram(
+        '🚀 Создание нарушения с параметрами:\n'
+        '• Domain ID: ${_domain!.id}\n'
+        '• Координаты: ${_position!.latitude}, ${_position!.longitude}\n'
+        '• Описание: $desc'
+      );
+
       context.read<MasqueradeBloc>().add(
         ReportViolation(
           description: desc,
@@ -115,10 +146,9 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
         ),
       );
 
-      await sendDebugToTelegram('🚀 ReportViolation отправлен из UI');
-      Navigator.pop(context);
+      sendDebugToTelegram('✅ ReportViolation отправлен с domainId: ${_domain!.id}');
     } catch (e, stack) {
-      await sendDebugToTelegram('❌ Ошибка UI: $e\n$stack');
+      sendDebugToTelegram('❌ Ошибка при создании нарушения: $e\n$stack');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Ошибка при отправке нарушения')),
       );
@@ -156,7 +186,7 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           Text(
-            'Общее влияние домена: ${_domain!.totalInfluence}',
+            'Общее влияние домена: ${_domain!.influenceLevel}',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
@@ -179,7 +209,8 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
             controller: _descriptionController,
             maxLines: 5,
             decoration: InputDecoration(
-              hintText: 'Я выпил у полицейского прямо на площади...',
+              hintText: 'Я отрастил когти прямо на площади...',
+              hintStyle: TextStyle(color: Colors.grey[600]),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -213,12 +244,72 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return BlocListener<MasqueradeBloc, MasqueradeState>(
+      listener: (context, state) {
+        if (state is ViolationsError) {
+          setState(() => _submitting = false);
+
+          if (state.message == 'max_hunger_exceeded') {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Невозможно создать нарушение: максимальный голод (5) будет превышен'),
+                backgroundColor: Colors.red,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+        } else if (state is ViolationReportedSuccessfully) {
+          // Показываем красное всплывающее сообщение
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Нарушение успешно создано!',
+                style: TextStyle(color: Colors.white),
+              ),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 2),
+            ),
+          );
+          // Закрываем экран после успешного создания
+          Navigator.pop(context);
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(title: const Text('Нарушение Маскарада')),
       body: Padding(
         padding: const EdgeInsets.all(20),
         child: _buildStepContent(),
       ),
-    );
+    ));
   }
+
+  DomainModel _findCorrectDomain(Position position, List<DomainModel> domains) {
+  sendDebugToTelegram('🔍 Поиск домена для координат: ${position.latitude}, ${position.longitude}');
+
+  // Сначала ищем в не-нейтральных доменах
+  for (final domain in domains) {
+    if (!domain.isNeutral && domain.isPointInside(position.latitude, position.longitude)) {
+      sendDebugToTelegram('✅ Найден домен: ${domain.name} (ID: ${domain.id})');
+      return domain;
+    }
+  }
+
+  // Если не найден в обычных доменах, ищем нейтральный
+  final neutralDomain = domains.firstWhere(
+    (d) => d.isNeutral,
+    orElse: () => DomainModel(
+      id: 4, // fallback to neutral territory
+      name: 'Нейтральная территория',
+      latitude: 0,
+      longitude: 0,
+      boundaryPoints: [],
+      isNeutral: true,
+      openViolationsCount: 0,
+      ownerId: '',
+    ),
+  );
+
+  sendDebugToTelegram('🌐 Используется нейтральная территория: ${neutralDomain.name}');
+  return neutralDomain;
+}
 }

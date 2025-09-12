@@ -9,6 +9,14 @@ abstract class MasqueradeEvent extends Equatable {
 
 class LoadViolations extends MasqueradeEvent {}
 
+class LoadViolationsForDomain extends MasqueradeEvent {
+  final int domainId;
+  const LoadViolationsForDomain(this.domainId);
+
+  @override
+  List<Object?> get props => [domainId];
+}
+
 class ReportViolation extends MasqueradeEvent {
   final String description;
   final int hungerSpent;
@@ -26,12 +34,12 @@ class ReportViolation extends MasqueradeEvent {
 
   @override
   List<Object?> get props => [
-    description,
-    hungerSpent,
-    latitude,
-    longitude,
-    domainId,
-  ];
+        description,
+        hungerSpent,
+        latitude,
+        longitude,
+        domainId,
+      ];
 }
 
 class StartHunt extends MasqueradeEvent {
@@ -65,4 +73,13 @@ class RevealViolator extends MasqueradeEvent {
 
   @override
   List<Object?> get props => [violationId];
+}
+
+class UpdateCurrentProfile extends MasqueradeEvent {
+  final ProfileModel profile;
+
+  const UpdateCurrentProfile(this.profile);
+
+  @override
+  List<Object?> get props => [profile];
 }
