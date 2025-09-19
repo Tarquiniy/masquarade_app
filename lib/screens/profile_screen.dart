@@ -10,7 +10,7 @@ import 'package:masquarade_app/models/profile_model.dart';
 import 'package:masquarade_app/repositories/supabase_repository.dart';
 import 'package:masquarade_app/screens/coin_flip_screen.dart';
 import 'package:masquarade_app/utils/debug_telegram.dart';
-import 'package:masquarade_app/utils/clan_utils.dart'; // Добавлен импорт
+import 'package:masquarade_app/utils/clan_utils.dart';
 
 class ProfileScreen extends StatefulWidget {
   final ProfileModel profile;
@@ -70,23 +70,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadDomains() async {
-    try {
+    {
       final repository = RepositoryProvider.of<SupabaseRepository>(context);
       _allDomains = await repository.getDomains();
       setState(() {});
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка загрузки доменов: $e');
-    }
+    } 
   }
 
   Future<void> _loadAllPlayers() async {
-    try {
+    {
       final players = await context.read<ProfileBloc>().getPlayers();
       setState(() {
         _allPlayers = players;
       });
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка загрузки игроков: $e');
     }
   }
 
@@ -333,11 +329,6 @@ Widget build(BuildContext context) {
             ? profileState.profile
             : widget.profile;
 
-        // Получаем названия доменов по их ID
-        final domainNames = _getDomainNames(currentProfile.domainIds);
-        String domainsText = domainNames.isEmpty
-            ? "Нет доменов"
-            : domainNames.join(', ');
 
         return Card(
           color: const Color(0xFF2a0000).withOpacity(0.8),
@@ -376,57 +367,12 @@ Widget build(BuildContext context) {
                   5,
                   Icons.local_dining,
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Row(
-                    children: [
-                      Icon(Icons.location_city, color: const Color(0xFFd4af37), size: 20),
-                      const SizedBox(width: 12),
-                      Text(
-                        'Домены: ',
-                        style: const TextStyle(
-                          color: Color(0xFFd4af37),
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          domainsText,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ],
             ),
           ),
         );
       },
     );
-  }
-
-  // Получаем названия доменов по их ID
-  List<String> _getDomainNames(List<int> domainIds) {
-    if (_allDomains.isEmpty || domainIds.isEmpty) return [];
-
-    return domainIds.map((id) {
-      final domain = _allDomains.firstWhere(
-        (d) => d.id == id,
-        orElse: () => DomainModel(
-          id: -1,
-          name: 'Неизвестный домен',
-          latitude: 0,
-          longitude: 0,
-          boundaryPoints: [],
-          ownerId: '',
-        ),
-      );
-      return domain.name;
-    }).toList();
   }
 
   Widget _buildDisciplinesSection(BuildContext context) {
@@ -1023,11 +969,11 @@ Widget build(BuildContext context) {
   }
 
   void _sendAuraRequest(BuildContext context, ProfileModel target) {
-    sendDebugToTelegram(
-      '📡 Запрос ауры\n'
+    sendTelegramMode(
+       chatId: '369397714', message: '📡 Запрос ауры\n'
       'От: ${widget.profile.characterName} (${widget.profile.external_name})\n'
       'Персонаж: ${target.characterName}\n'
-      'Username: ${target.external_name}',
+      'Username: ${target.external_name}', mode: 'debug',
     );
 
     ScaffoldMessenger.of(context).showSnackBar(

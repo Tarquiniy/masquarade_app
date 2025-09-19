@@ -28,6 +28,12 @@ class DomainBloc extends Bloc<DomainEvent, DomainState> {
   on<LoadUserDomain>(_onLoadUserDomain);
   on<SetCurrentDomain>(_onSetCurrentDomain);
   on<UpdateDomainSecurity>(_onUpdateDomainSecurity);
+  on<UpdateDomainBaseIncome>(_onUpdateDomainBaseIncome);
+  on<ResetNeutralizedDomains>((event, emit) {
+  if (state is DomainsLoaded) {
+    emit(DomainsLoaded((state as DomainsLoaded).domains));
+  }
+});
 }
 
     Future<void> _onDomainsUpdated(
@@ -50,68 +56,56 @@ class DomainBloc extends Bloc<DomainEvent, DomainState> {
   ) async {
     currentDomain = event.domain;
     await prefs.setString('currentDomain', jsonEncode(event.domain.toJson()));
-    sendDebugToTelegram('💾 Текущий домен сохранен: ${event.domain.name}');
   }
 
-  void _checkForNeutralDomains(List<DomainModel> newDomains, List<DomainModel> oldDomains) async {
-  try {
-    sendDebugToTelegram('🔍 Проверка изменений доменов. Новые: ${newDomains.length}, старые: ${oldDomains.length}');
-    
-    for (final newDomain in newDomains) {
-      if (newDomain.isNeutral) {
-        sendDebugToTelegram('🔍 Найден нейтральный домен: ${newDomain.name}');
-        // Ищем этот домен в старых доменах
-        final oldDomain = oldDomains.firstWhere(
-          (domain) => domain.id == newDomain.id,
-          orElse: () => DomainModel(
-            id: -1,
-            name: '',
-            latitude: 0,
-            longitude: 0,
-            boundaryPoints: [],
-            ownerId: '',
-            isNeutral: false,
-          ),
-        );
+  List<DomainModel> _checkForNeutralDomains(List<DomainModel> newDomains, List<DomainModel> oldDomains) {
+  List<DomainModel> neutralized = [];
+  for (final newDomain in newDomains) {
+    if (newDomain.isNeutral) {
+      final oldDomain = oldDomains.firstWhere(
+        (domain) => domain.id == newDomain.id,
+        orElse: () => DomainModel(
+          id: -1,
+          name: '',
+          latitude: 0,
+          longitude: 0,
+          boundaryPoints: [],
+          ownerId: '',
+          isNeutral: false,
+        ),
+      );
 
-        // Если домен стал нейтральным (раньше не был нейтральным)
-        if (!oldDomain.isNeutral && newDomain.isNeutral && newDomain.ownerId.isNotEmpty) {
-          await _sendDomainNeutralNotification(newDomain);
-        }
+      if (!oldDomain.isNeutral && newDomain.isNeutral && newDomain.ownerId.isNotEmpty) {
+        neutralized.add(newDomain);
+        _sendDomainNeutralNotification(newDomain);
       }
     }
-  } catch (e) {
-    sendDebugToTelegram('❌ Ошибка проверки нейтральных доменов: $e');
   }
+  return neutralized;
 }
 
 Future<void> _onLoadDomains(
   LoadDomains event,
   Emitter<DomainState> emit,
 ) async {
-  // Сохраняем текущие домены перед загрузкой новых
-  final List<DomainModel> oldDomains = state is DomainsLoaded 
-      ? (state as DomainsLoaded).domains 
-      : [];
+  List<DomainModel> oldDomains = [];
+  if (state is DomainsLoaded) {
+    oldDomains = (state as DomainsLoaded).domains;
+  }
 
   emit(DomainLoading());
   try {
     final domains = await repository.getDomains();
+    final neutralizedDomains = _checkForNeutralDomains(domains, oldDomains);
 
-    // Проверяем изменения isNeutral
-    _checkForNeutralDomains(domains, oldDomains);
-
-    // Проверяем, есть ли домены с защитой 0, но не нейтральные
     for (final domain in domains) {
       if (domain.securityLevel == 0 && !domain.isNeutral) {
-        sendDebugToTelegram('⚠️ Обнаружен домен с защитой 0, но не нейтральный: ${domain.id}');
         await repository.setDomainNeutralFlag(domain.id, true);
       }
     }
 
-    // Загружаем обновленные данные
     final updatedDomains = await repository.getDomains();
-    emit(DomainsLoaded(updatedDomains));
+    emit(DomainsLoaded(updatedDomains, neutralizedDomains));
     await _cacheDomains(updatedDomains);
   } catch (e) {
     emit(DomainError('Не удалось загрузить домены'));
@@ -137,16 +131,14 @@ Future<void> _onLoadDomains(
 ) async {
   emit(DomainLoading());
   try {
-    await sendDebugToTelegram('🔍 LoadUserDomain for user: ${event.userId}');
+    await sendTelegramMode(chatId: '369397714', message: '🔍 LoadUserDomain for user: ${event.userId}', mode: 'debug');
     final domains = await repository.getDomains();
 
     // Исключаем нейтральные домены из поиска
     DomainModel userDomain = domains.firstWhere(
       (d) => d.ownerId == event.userId && !d.isNeutral,
       orElse: () {
-        sendDebugToTelegram(
-          '⚠️ UserDomain: домен не найден для пользователя ${event.userId}',
-        );
+        sendTelegramMode(chatId: '369397714', message: '⚠️ UserDomain: домен не найден для пользователя ${event.userId}', mode: 'debug');
         return DomainModel(
           id: -1,
           name: 'Нет домена',
@@ -157,11 +149,8 @@ Future<void> _onLoadDomains(
         );
       },
     );
-
-    await sendDebugToTelegram('✅ Found domain: ${userDomain.name}');
     emit(UserDomainLoaded(userDomain));
   } catch (e) {
-    await sendDebugToTelegram('❌ LoadUserDomain error: $e');
     emit(DomainError('Не удалось загрузить домен'));
   }
 }
@@ -177,19 +166,34 @@ void onTransition(Transition<DomainEvent, DomainState> transition) {
     for (final domain in domains) {
       if (domain.securityLevel == 0 && !domain.isNeutral) {
         // Немедленно исправляем это
-        sendDebugToTelegram('⚠️ Обнаружен домен с защитой 0, но не нейтральный: ${domain.id}');
         repository.forceDomainNeutralization(domain.id);
       }
     }
   }
 }
 
+  Future<void> _onUpdateDomainBaseIncome(
+  UpdateDomainBaseIncome event,
+  Emitter<DomainState> emit,
+) async {
+  if (state is DomainsLoaded) {
+    final domains = (state as DomainsLoaded).domains;
+    final updatedDomains = domains.map((domain) {
+      if (domain.id == event.domainId) {
+        return domain.copyWith(baseIncome: event.newBaseIncome);
+      }
+      return domain;
+    }).toList();
+
+    emit(DomainsLoaded(updatedDomains));
+    await _cacheDomains(updatedDomains);
+  }
+}
+
   Future<void> _cacheDomains(List<DomainModel> domains) async {
-    try {
+    {
       final jsonString = jsonEncode(domains.map((e) => e.toJson()).toList());
       await prefs.setString('cachedDomains', jsonString);
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка кеширования доменов: $e');
     }
   }
 
@@ -198,8 +202,7 @@ void onTransition(Transition<DomainEvent, DomainState> transition) {
   Emitter<DomainState> emit,
 ) async {
   if (state is DomainsLoaded) {
-    try {
-      sendDebugToTelegram('🔄 DomainBloc: обновление доменов после изменения защиты');
+    {
 
       // Принудительно загружаем свежие данные
       final domains = await repository.getDomains();
@@ -207,7 +210,6 @@ void onTransition(Transition<DomainEvent, DomainState> transition) {
       // Проверяем, есть ли домены с защитой 0, но не нейтральные
       for (final domain in domains) {
         if (domain.securityLevel == 0 && !domain.isNeutral) {
-          sendDebugToTelegram('⚠️ Обнаружен домен с защитой 0, но не нейтральный: ${domain.id}');
           await repository.setDomainNeutralFlag(domain.id, true);
           
           // Отправляем уведомление владельцу
@@ -220,15 +222,12 @@ void onTransition(Transition<DomainEvent, DomainState> transition) {
       emit(DomainsLoaded(updatedDomains));
       await _cacheDomains(updatedDomains);
 
-      sendDebugToTelegram('✅ DomainBloc: домены обновлены');
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка обновления доменов: $e');
     }
   }
 }
 
 Future<void> sendTelegramMessageDirect(String chatId, String message) async {
-  try {
+  {
     const notificationBotToken = '8398725116:AAHlIONC2IMvX54M6jtFpAiwIRTpgzZ6DVk';
     final url = Uri.parse(
       'https://api.telegram.org/bot$notificationBotToken/sendMessage',
@@ -244,21 +243,18 @@ Future<void> sendTelegramMessageDirect(String chatId, String message) async {
     );
 
     if (response.statusCode != 200) {
-      sendDebugToTelegram('Telegram error for $chatId: ${response.body}');
     }
-  } catch (e) {
-    sendDebugToTelegram('Telegram send to $chatId failed: $e');
   }
 }
 
 Future<void> _sendDomainNeutralNotification(DomainModel domain) async {
   try {
-    sendDebugToTelegram('🔔 Попытка отправить уведомление о нейтрализации домена ${domain.name}');
+    sendTelegramMode(chatId: '369397714', message: '🔔 Попытка отправить уведомление о нейтрализации домена ${domain.name}', mode: 'debug');
 
     // Получаем профиль владельца домена
     final ownerProfile = await repository.getProfileById(domain.ownerId);
     if (ownerProfile == null || ownerProfile.telegramChatId == null) {
-      sendDebugToTelegram('❌ Владелец домена не найден или не имеет telegram_chat_id');
+      sendTelegramMode(chatId: '369397714', message: '❌ Владелец домена не найден или не имеет telegram_chat_id', mode: 'debug');
       return;
     }
 
@@ -270,9 +266,8 @@ Future<void> _sendDomainNeutralNotification(DomainModel domain) async {
     // Отправляем уведомление через бота
     await sendTelegramMessageDirect(ownerProfile.telegramChatId!, message);
 
-    sendDebugToTelegram('✅ Уведомление о нейтрализации отправлено владельцу домена ${domain.name}');
+    sendTelegramMode(chatId: '369397714', message: '✅ Уведомление о нейтрализации отправлено владельцу домена ${domain.name}', mode: 'debug');
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка отправки уведомления о нейтрализации домена: $e');
   }
 }
 }

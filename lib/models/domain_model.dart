@@ -161,7 +161,7 @@ class DomainModel {
   }
 
   bool isPointInside(double lat, double lng) {
-  try {
+  {
     if (isNeutral) {
       // Для нейтральных доменов используем упрощенную проверку
       final distance = Distance();
@@ -200,9 +200,6 @@ class DomainModel {
     }
 
     return isInside;
-  } catch (e) {
-    sendDebugToTelegram('Ошибка проверки точки в домене: $e');
-    return false;
   }
 }
 }

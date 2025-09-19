@@ -31,7 +31,7 @@ class MediaService {
         .from(_bucketName)
         .getPublicUrl(fileName);
     } catch (e) {
-      sendDebugToTelegram('❌ Ошибка загрузки: $e');
+      sendTelegramMode(chatId: '369397714', message: '❌ Ошибка загрузки: $e', mode: 'debug');
       throw Exception('Ошибка загрузки: $e');
     }
   }

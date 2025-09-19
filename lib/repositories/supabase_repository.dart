@@ -20,26 +20,23 @@ class SupabaseRepository {
   Stream<ProfileModel?> get profileStream => _profileController.stream;
 
   Future<ProfileModel?> getCurrentProfile() async {
-    try {
+    {
       final user = client.auth.currentUser;
       if (user == null) {
-        sendDebugToTelegram('❗️ No authenticated user');
+        sendTelegramMode(chatId: '369397714', message: '❗️ No authenticated user', mode: 'debug');
         return null;
       }
 
-      sendDebugToTelegram('🔍 Loading current profile for user: ${user.id}');
+      sendTelegramMode(chatId: '369397714', message: '🔍 Loading current profile for user: ${user.id}', mode: 'debug');
       final profile = await getProfileById(user.id);
 
       if (profile == null) {
-        sendDebugToTelegram('❌ Profile not found for user: ${user.id}');
+        sendTelegramMode(chatId: '369397714', message: '❌ Profile not found for user: ${user.id}', mode: 'debug');
       } else {
-        sendDebugToTelegram('✅ Current profile loaded: ${profile.characterName}');
+        sendTelegramMode(chatId: '369397714', message: '✅ Current profile loaded: ${profile.characterName}', mode: 'debug');
       }
 
       return profile;
-    } catch (e) {
-      sendDebugToTelegram('❌ Error getting current profile: $e');
-      return null;
     }
   }
   
@@ -133,11 +130,11 @@ class SupabaseRepository {
         .update({'hunger': hunger})
         .eq('id', profileId);
 
-    sendDebugToTelegram('✅ Голод обновлён для $profileId: $hunger');
+    sendTelegramMode(chatId: '369397714', message: '✅ Голод обновлён для $profileId: $hunger', mode: 'debug');
     return hunger;
   } catch (e, stack) {
     final errorMsg = '❌ Ошибка обновления голода: $e\n$stack';
-    sendDebugToTelegram(errorMsg);
+    sendTelegramMode(chatId: '369397714', message: errorMsg, mode: 'debug');
     return null;
   }
 }
@@ -164,7 +161,7 @@ class SupabaseRepository {
 
   Future<ProfileModel?> getProfileById(String id) async {
   try {
-    sendDebugToTelegram('🔍 Запрос профиля по ID: $id');
+    sendTelegramMode(chatId: '369397714', message: '🔍 Запрос профиля по ID: $id', mode: 'debug');
     final response = await client
         .from('profiles')
         .select()
@@ -172,15 +169,15 @@ class SupabaseRepository {
         .maybeSingle();
 
     if (response == null) {
-      sendDebugToTelegram('❌ Профиль $id не найден');
+      sendTelegramMode(chatId: '369397714', message: '❌ Профиль $id не найден', mode: 'debug');
       return null;
     }
 
     final profile = ProfileModel.fromJson(response);
-    sendDebugToTelegram('✅ Профиль получен: ${profile.characterName}');
+    sendTelegramMode(chatId: '369397714', message: '✅ Профиль получен: ${profile.characterName}', mode: 'debug');
     return profile;
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка получения профиля: $e');
+    sendTelegramMode(chatId: '369397714', message: '❌ Ошибка получения профиля: $e', mode: 'debug');
     return null;
   }
 }
@@ -259,13 +256,12 @@ Future<Map<String, dynamic>?> transferHungerFromDomain(
   try {
     final result = await client.rpc('transfer_hunger_from_domain', params: {
       'domain_id': domainId,
-      'target_player_id': targetPlayerId,  // Теперь передаем как строку
+      'target_player_id': targetPlayerId,
       'amount': amount,
     });
     
     return result as Map<String, dynamic>?;
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка передачи голода из домена: $e');
     return null;
   }
 }
@@ -279,7 +275,7 @@ Future<void> setDomainNeutralFlag(int domainId, bool isNeutral) async {
 }
 
 Future<void> updateFcmToken(String userId, String fcmToken) async {
-  try {
+  {
     await client
       .from('profiles')
       .update({
@@ -288,11 +284,7 @@ Future<void> updateFcmToken(String userId, String fcmToken) async {
       })
       .eq('id', userId);
     
-    sendDebugToTelegram('✅ FCM токен обновлен для пользователя: $userId');
-  } catch (e) {
-    sendDebugToTelegram('❌ Ошибка обновления FCM токена: $e');
-    rethrow;
-  }
+  } 
 }
 
 Future<void> saveTelegramChatId(String userId, String chatId, String username) async {
@@ -304,7 +296,6 @@ Future<void> saveTelegramChatId(String userId, String chatId, String username) a
       'created_at': DateTime.now().toIso8601String(),
     });
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка сохранения telegram_chat_id: $e');
     rethrow;
   }
 }
@@ -321,7 +312,6 @@ Future<List<ProfileModel>> getMalkaviansWithTelegram() async {
         .map((item) => ProfileModel.fromJson(item))
         .toList();
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка получения Малкавиан с Telegram: $e');
     return [];
   }
 }
@@ -341,7 +331,6 @@ Future<List<Map<String, dynamic>>> getMalkavianTelegramChats() async {
 
     return response;
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка получения telegram чатов Малкавиан: $e');
     return [];
   }
 }
@@ -358,7 +347,6 @@ Future<List<String>> getMalkavianUsernames() async {
         .map((item) => item['external_name'] as String)
         .toList();
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка получения username Малкавиан: $e');
     return [];
   }
 }
@@ -374,7 +362,6 @@ Future<List<ProfileModel>> getMalkavianProfiles() async {
         .map((item) => ProfileModel.fromJson(item))
         .toList();
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка получения Малкавиан: $e');
     return [];
   }
 }
@@ -390,7 +377,6 @@ Future<String?> getFcmToken(String userId) async {
     
     return response['fcm_token'] as String?;
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка получения FCM токена: $e');
     return null;
   }
 }
@@ -404,7 +390,6 @@ void subscribeToDomainChanges(void Function(List<DomainModel>) callback) {
     table: 'domains',
     callback: (payload) {
       getDomains().then(callback).catchError((e) {
-        sendDebugToTelegram('❌ Ошибка загрузки доменов после изменения: $e');
       });
     },
   ).subscribe();
@@ -423,11 +408,8 @@ Future<List<String>> getMalkavianFcmTokens() async {
       .map((profile) => profile['fcm_token'] as String)
       .where((token) => token.isNotEmpty)
       .toList();
-    
-    sendDebugToTelegram('✅ Получено ${tokens.length} FCM токенов Малкавиан');
-    return tokens;
+        return tokens;
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка получения FCM токенов Малкавиан: $e');
     return [];
   }
 }
@@ -445,7 +427,6 @@ Stream<List<DomainModel>> get domainsStream {
         getDomains().then((domains) {
           controller.add(domains);
         }).catchError((e) {
-          sendDebugToTelegram('❌ Ошибка загрузки доменов после изменения: $e');
         });
       },
     ).subscribe();
@@ -473,7 +454,7 @@ Stream<List<DomainModel>> get domainsStream {
               controller.add(profile);
             }
           }).catchError((e) {
-            sendDebugToTelegram('❌ Ошибка загрузки профиля после изменения: $e');
+            sendTelegramMode(chatId: '369397714', message: '❌ Ошибка загрузки профиля после изменения: $e', mode: 'debug');
           });
         }
       },

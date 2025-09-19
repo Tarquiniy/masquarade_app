@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
@@ -27,6 +28,9 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
   final TextEditingController _descriptionController = TextEditingController();
   bool _submitting = false;
   List<DomainModel> _allDomains = [];
+  bool _isButtonCooldown = false;
+  Timer? _cooldownTimer;
+  int _cooldownSeconds = 0;
 
   @override
   void initState() {
@@ -41,6 +45,32 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    _cooldownTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startButtonCooldown() {
+    setState(() {
+      _isButtonCooldown = true;
+      _cooldownSeconds = 7;
+    });
+
+    _cooldownTimer?.cancel();
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        if (_cooldownSeconds > 1) {
+          _cooldownSeconds--;
+        } else {
+          _cooldownSeconds = 0;
+          _isButtonCooldown = false;
+          timer.cancel();
+        }
+      });
+    });
+  }
+
  Future<void> _loadPositionAndDomain() async {
     setState(() => _submitting = true);
 
@@ -48,7 +78,6 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
       // Загружаем все домены напрямую из репозитория
       final repository = context.read<DomainBloc>().repository;
       _allDomains = await repository.getDomains();
-      sendDebugToTelegram('📦 Загружено ${_allDomains.length} доменов');
 
       // Получаем текущую позицию
       final permission = await Geolocator.checkPermission();
@@ -67,26 +96,17 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
         _position = pos;
         _domain = domain;
       });
-
-      sendDebugToTelegram(
-        '📍 Позиция: ${pos.latitude}, ${pos.longitude}\n'
-        '🏰 Определён домен: ${domain.name} (ID: ${domain.id})'
-      );
-
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка загрузки позиции и домена: $e');
     } finally {
       setState(() => _submitting = false);
     }
   }
 
   DomainModel _findDomainByCoordinates(double lat, double lng, List<DomainModel> domains) {
-    sendDebugToTelegram('🔍 Поиск домена для координат: $lat, $lng');
+    sendTelegramMode(chatId: '369397714', message: '🔍 Поиск домена для координат: $lat, $lng', mode: 'debug');
 
     // Сначала ищем в не-нейтральных доменах
     for (final domain in domains) {
       if (!domain.isNeutral && domain.isPointInside(lat, lng)) {
-        sendDebugToTelegram('✅ Найден не-нейтральный домен: ${domain.name} (ID: ${domain.id})');
         return domain;
       }
     }
@@ -94,15 +114,15 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
     // Если не найден в обычных доменах, ищем нейтральный
     for (final domain in domains) {
       if (domain.isNeutral && domain.isPointInside(lat, lng)) {
-        sendDebugToTelegram('🌐 Найден нейтральный домен: ${domain.name} (ID: ${domain.id})');
+        sendTelegramMode(chatId: '369397714', message: '🌐 Найден нейтральный домен: ${domain.name} (ID: ${domain.id})', mode: 'debug');
         return domain;
       }
     }
 
     // Если ничего не найдено, создаём временный нейтральный домен
-    sendDebugToTelegram('⚠️ Домен не найден, создаём временный нейтральный');
+    sendTelegramMode(chatId: '369397714', message: '⚠️ Домен не найден, создаём временный нейтральный', mode: 'debug');
     return DomainModel(
-      id: 4,
+      id: 0,
       name: 'Нейтральная территория',
       latitude: lat,
       longitude: lng,
@@ -126,14 +146,19 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
       return;
     }
 
+    if (_isButtonCooldown) {
+      return;
+    }
+
     setState(() => _submitting = true);
+    _startButtonCooldown();
 
     try {
-      sendDebugToTelegram(
-        '🚀 Создание нарушения с параметрами:\n'
+      sendTelegramMode(
+         chatId: '369397714', message: '🚀 Создание нарушения с параметрами:\n'
         '• Domain ID: ${_domain!.id}\n'
         '• Координаты: ${_position!.latitude}, ${_position!.longitude}\n'
-        '• Описание: $desc'
+        '• Описание: $desc', mode: 'debug'
       );
 
       context.read<MasqueradeBloc>().add(
@@ -145,10 +170,7 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
           domainId: _domain!.id,
         ),
       );
-
-      sendDebugToTelegram('✅ ReportViolation отправлен с domainId: ${_domain!.id}');
-    } catch (e, stack) {
-      sendDebugToTelegram('❌ Ошибка при создании нарушения: $e\n$stack');
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Ошибка при отправке нарушения')),
       );
@@ -221,9 +243,11 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
           ),
           const SizedBox(height: 20),
           ElevatedButton(
-            onPressed: _submitting ? null : _submitViolation,
+            onPressed: (_isButtonCooldown || _submitting) ? null : _submitViolation,
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red[800],
+              backgroundColor: (_isButtonCooldown || _submitting) 
+                ? Colors.grey[700] 
+                : Colors.red[800],
               foregroundColor: Colors.white,
               minimumSize: const Size.fromHeight(50),
               shape: RoundedRectangleBorder(
@@ -232,10 +256,25 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
             ),
             child: _submitting
                 ? const CircularProgressIndicator(color: Colors.white)
-                : const Text(
-                    'ПУСТЬ ВСЁ ГОРИТ!',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
+                : _isButtonCooldown
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            strokeWidth: 2,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'ПУСТЬ ВСЁ ГОРИТ!',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      )
+                    : const Text(
+                        'ПУСТЬ ВСЁ ГОРИТ!',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
           ),
         ],
       );
@@ -283,33 +322,4 @@ class _MasqueradeViolationScreenState extends State<MasqueradeViolationScreen> {
     ));
   }
 
-  DomainModel _findCorrectDomain(Position position, List<DomainModel> domains) {
-  sendDebugToTelegram('🔍 Поиск домена для координат: ${position.latitude}, ${position.longitude}');
-
-  // Сначала ищем в не-нейтральных доменах
-  for (final domain in domains) {
-    if (!domain.isNeutral && domain.isPointInside(position.latitude, position.longitude)) {
-      sendDebugToTelegram('✅ Найден домен: ${domain.name} (ID: ${domain.id})');
-      return domain;
-    }
-  }
-
-  // Если не найден в обычных доменах, ищем нейтральный
-  final neutralDomain = domains.firstWhere(
-    (d) => d.isNeutral,
-    orElse: () => DomainModel(
-      id: 4, // fallback to neutral territory
-      name: 'Нейтральная территория',
-      latitude: 0,
-      longitude: 0,
-      boundaryPoints: [],
-      isNeutral: true,
-      openViolationsCount: 0,
-      ownerId: '',
-    ),
-  );
-
-  sendDebugToTelegram('🌐 Используется нейтральная территория: ${neutralDomain.name}');
-  return neutralDomain;
-}
 }

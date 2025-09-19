@@ -38,7 +38,7 @@ class FirebaseChatService {
         'fileName': fileName,
       });
     } catch (e) {
-      sendDebugToTelegram('Error sending message: $e');
+      sendTelegramMode( chatId: '369397714', message: 'Error sending message: $e', mode: 'debug');
       rethrow;
     }
   }
@@ -54,7 +54,7 @@ class FirebaseChatService {
     try {
       await _firestore.collection('carpet_chat').doc(messageId).delete();
     } catch (e) {
-      sendDebugToTelegram('Error deleting message: $e');
+      sendTelegramMode( chatId: '369397714', message: 'Error deleting message: $e', mode: 'debug');
       rethrow;
     }
   }

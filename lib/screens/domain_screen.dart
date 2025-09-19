@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -48,15 +49,14 @@ class _DomainScreenState extends State<DomainScreen> {
   StreamSubscription? _domainUpdateSubscription;
   bool _isCheckingLocation = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _currentDomain = widget.domain;
+    sendTelegramMode(chatId: '369397714', message: '🚀 Инициализация DomainScreen для домена ${_currentDomain.id}', mode: 'debug');
 
-@override
-void initState() {
-  super.initState();
-  _currentDomain = widget.domain;
-  sendDebugToTelegram('🚀 Инициализация DomainScreen для домена ${_currentDomain.id}');
-
-  // Подписка на обновления домена в реальном времени
-  _subscribeToDomainUpdates();
+    // Подписка на обновления домена в реальном времени
+    _subscribeToDomainUpdates();
 
     // Подписываемся на обновления DomainBloc
     _domainSubscription = context.read<DomainBloc>().stream.listen((state) {
@@ -70,7 +70,6 @@ void initState() {
           setState(() {
             _currentDomain = updatedDomain;
           });
-          sendDebugToTelegram('🔄 Защита домена обновлена: ${_currentDomain.securityLevel}/$_maxSecurityLevel');
         }
 
         if (updatedDomain.isNeutral != _currentDomain.isNeutral) {
@@ -112,14 +111,13 @@ void initState() {
     });
   }
 
-// Обновляем метод dispose
-@override
-void dispose() {
-  _domainUpdateSubscription?.cancel();
-  _domainChannel?.unsubscribe();
-  _domainSubscription?.cancel();
-  super.dispose();
-}
+  @override
+  void dispose() {
+    _domainUpdateSubscription?.cancel();
+    _domainChannel?.unsubscribe();
+    _domainSubscription?.cancel();
+    super.dispose();
+  }
 
   Future<void> _loadOwnerName() async {
     final repository = context.read<DomainBloc>().repository;
@@ -132,183 +130,167 @@ void dispose() {
   }
 
   void _subscribeToDomainUpdates() {
-  final repository = context.read<DomainBloc>().repository;
-  _domainUpdateSubscription = repository.client
-    .from('domains')
-    .stream(primaryKey: ['id'])
-    .eq('id', _currentDomain.id)
-    .listen((data) {
+    final repository = context.read<DomainBloc>().repository;
+    _domainUpdateSubscription = repository.client
+        .from('domains')
+        .stream(primaryKey: ['id'])
+        .eq('id', _currentDomain.id)
+        .listen((data) {
       if (data.isNotEmpty && mounted) {
         final updatedDomain = DomainModel.fromJson(data.first);
         setState(() {
           _currentDomain = updatedDomain;
         });
-        sendDebugToTelegram('🔄 Домен обновлен в реальном времени: ${updatedDomain.isNeutral ? 'Нейтральный' : 'Не нейтральный'}');
+        sendTelegramMode(chatId: '369397714', message: '🔄 Домен обновлен в реальном времени: ${updatedDomain.isNeutral ? 'Нейтральный' : 'Не нейтральный'}', mode: 'debug');
 
         // Проверяем, нужно ли показать диалог после обновления
         _checkAndShowNeutralDialog();
       }
     });
-}
+  }
 
-void _checkAndShowNeutralDialog() async {
-  if (_isCheckingLocation || _hasShownNeutralDialog) return;
+  void _checkAndShowNeutralDialog() async {
+    if (_isCheckingLocation || _hasShownNeutralDialog) return;
 
-  _isCheckingLocation = true;
+    _isCheckingLocation = true;
 
-  try {
-    // Получаем актуальное местоположение
-    final position = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.best,
-    );
+    try {
+      // Получаем актуальное местоположение
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.best,
+      );
 
-    setState(() {
-      _position = position;
-    });
+      setState(() {
+        _position = position;
+      });
 
-    // Получаем актуальные данные домена
+      // Получаем актуальные данные домена
+      final repository = context.read<DomainBloc>().repository;
+      final domains = await repository.getDomains();
+      final currentDomain = domains.firstWhere(
+        (d) => d.id == _currentDomain.id,
+        orElse: () => _currentDomain,
+      );
+
+      setState(() {
+        _currentDomain = currentDomain;
+      });
+      final message = '🔍 Проверка нейтрального домена:\n'
+          '• isNeutral: ${_currentDomain.isNeutral}\n'
+          '• Позиция: ${_position?.latitude}, ${_position?.longitude}\n'
+          '• В границах: ${_currentDomain.isPointInside(_position!.latitude, _position!.longitude)}';
+      sendTelegramMode(chatId: '369397714', message: message, mode: 'debug');
+
+      // Проверяем все условия для показа диалога
+      if (_currentDomain.isNeutral &&
+          _position != null &&
+          _currentDomain.isPointInside(_position!.latitude, _position!.longitude) &&
+          !_hasShownNeutralDialog &&
+          mounted) {
+
+        _hasShownNeutralDialog = true;
+
+        // Небольшая задержка для полной загрузки интерфейса
+        Future.delayed(const Duration(milliseconds: 1000), () {
+          if (mounted) {
+            _showNeutralDomainDialog(context);
+          }
+        });
+      }
+    } finally {
+      _isCheckingLocation = false;
+    }
+  }
+
+  Future<void> _refreshDomainData() async {
     final repository = context.read<DomainBloc>().repository;
     final domains = await repository.getDomains();
-    final currentDomain = domains.firstWhere(
+    final updatedDomain = domains.firstWhere(
+      (d) => d.id == _currentDomain?.id,
+      orElse: () => _currentDomain!,
+    );
+
+    if (mounted) {
+      setState(() {
+        _currentDomain = updatedDomain;
+      });
+    }
+  }
+
+  Future<void> _loadInitialData() async {
+    await _getCurrentLocation();
+    // Загружаем все домены для правильного определения
+    final repository = context.read<DomainBloc>().repository;
+    _allDomains = await repository.getDomains();
+
+    // Обновляем текущий домен актуальными данными
+    final updatedDomain = _allDomains.firstWhere(
       (d) => d.id == _currentDomain.id,
       orElse: () => _currentDomain,
     );
 
     setState(() {
-      _currentDomain = currentDomain;
+      _currentDomain = updatedDomain;
     });
+    final message='🏰 Детали домена:\n'
+        '• ID: ${_currentDomain.id}\n'
+        '• Название: ${_currentDomain.name}\n'
+        '• Владелец: ${_currentDomain.ownerId}\n'
+        '• Нейтральный: ${_currentDomain.isNeutral}\n'
+        '• Открытых нарушений: ${_currentDomain.openViolationsCount}\n'
+        '• Границы: ${_currentDomain.boundaryPoints.length} точек';
+    sendTelegramMode(chatId: '369397714', message: message, mode: 'debug');
 
-    sendDebugToTelegram(
-      '🔍 Проверка нейтрального домена:\n'
-      '• isNeutral: ${_currentDomain.isNeutral}\n'
-      '• Позиция: ${_position?.latitude}, ${_position?.longitude}\n'
-      '• В границах: ${_currentDomain.isPointInside(_position!.latitude, _position!.longitude)}'
-    );
-
-    // Проверяем все условия для показа диалога
-    if (_currentDomain.isNeutral &&
-        _position != null &&
-        _currentDomain.isPointInside(_position!.latitude, _position!.longitude) &&
-        !_hasShownNeutralDialog &&
-        mounted) {
-
-      _hasShownNeutralDialog = true;
-
-      // Небольшая задержка для полной загрузки интерфейса
-      Future.delayed(const Duration(milliseconds: 1000), () {
-        if (mounted) {
-          _showNeutralDomainDialog(context);
-        }
-      });
-    }
-  } catch (e) {
-    sendDebugToTelegram('❌ Ошибка при проверке нейтрального домена: $e');
-  } finally {
-    _isCheckingLocation = false;
+    // Проверяем и показываем диалог
+    _checkAndShowNeutralDialog();
   }
-}
-
-  Future<void> _refreshDomainData() async {
-    try {
-      final repository = context.read<DomainBloc>().repository;
-      final domains = await repository.getDomains();
-      final updatedDomain = domains.firstWhere(
-        (d) => d.id == _currentDomain?.id,
-        orElse: () => _currentDomain!,
-      );
-
-      if (mounted) {
-        setState(() {
-          _currentDomain = updatedDomain;
-        });
-      }
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка обновления данных домена: $e');
-    }
-  }
-
-  Future<void> _loadInitialData() async {
-  sendDebugToTelegram('🌀 Начало загрузки данных для домена ${_currentDomain.id}');
-  await _getCurrentLocation();
-  sendDebugToTelegram('📍 Геолокация получена для домена ${_currentDomain.id}');
-
-  // Загружаем все домены для правильного определения
-  final repository = context.read<DomainBloc>().repository;
-  _allDomains = await repository.getDomains();
-
-  // Обновляем текущий домен актуальными данными
-  final updatedDomain = _allDomains.firstWhere(
-    (d) => d.id == _currentDomain.id,
-    orElse: () => _currentDomain,
-  );
-
-  setState(() {
-    _currentDomain = updatedDomain;
-  });
-
-  sendDebugToTelegram(
-    '🏰 Детали домена:\n'
-    '• ID: ${_currentDomain.id}\n'
-    '• Название: ${_currentDomain.name}\n'
-    '• Владелец: ${_currentDomain.ownerId}\n'
-    '• Нейтральный: ${_currentDomain.isNeutral}\n'
-    '• Открытых нарушений: ${_currentDomain.openViolationsCount}\n'
-    '• Границы: ${_currentDomain.boundaryPoints.length} точек'
-  );
-
-  // Проверяем и показываем диалог
-  _checkAndShowNeutralDialog();
-}
-
 
   void _showNeutralDomainDialog(BuildContext context) {
-  sendDebugToTelegram('🔄 Показ диалога захвата нейтрального домена');
-
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (BuildContext context) {
-      return AlertDialog(
-        title: const Text(
-          'Захват территории',
-          style: TextStyle(color: Color(0xFFd4af37), fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: const Color(0xFF2a0000),
-        content: const Text(
-          'Вы находитесь на территории нейтрального домена. Захватить домен?',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _showCaptureOptionsDialog(context);
-            },
-            child: const Text(
-              'Да!',
-              style: TextStyle(color: Color(0xFFd4af37)),
-            ),
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text(
+            'Захват территории',
+            style: TextStyle(color: Color(0xFFd4af37), fontWeight: FontWeight.bold),
           ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Нет, мне только покушать'),
-                  backgroundColor: Colors.blue,
-                ),
-              );
-            },
-            child: const Text(
-              'Нет, мне только покушать',
-              style: TextStyle(color: Colors.grey),
-            ),
+          backgroundColor: const Color(0xFF2a0000),
+          content: const Text(
+            'Вы находитесь на территории нейтрального домена. Захватить домен?',
+            style: TextStyle(color: Colors.white70),
           ),
-        ],
-      );
-    },
-  );
-}
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _showCaptureOptionsDialog(context);
+              },
+              child: const Text(
+                'Да!',
+                style: TextStyle(color: Color(0xFFd4af37)),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Нет, мне только покушать'),
+                    backgroundColor: Colors.blue,
+                  ),
+                );
+              },
+              child: const Text(
+                'Нет, мне только покушать',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   // Диалог выбора способа захвата
   void _showCaptureOptionsDialog(BuildContext context) {
@@ -365,17 +347,17 @@ void _checkAndShowNeutralDialog() async {
 
     // Отправляем супер-заметное уведомление мастерам
     final message =
-      '‼️‼️‼️ ЗАПРОС НА ЗАХВАТ ДОМЕНА ‼️‼️‼️\n\n'
-      '🚨 ВНИМАНИЕ МАСТЕРАМ! 🚨\n\n'
-      'Игрок ${widget.profile.characterName} хочет захватить домен!\n'
-      '• Домен: ${_currentDomain.name} (ID: ${_currentDomain.id})\n'
-      '• Способ: $method\n'
-      '• Игрок: ${widget.profile.characterName} (${widget.profile.clan}, ${widget.profile.sect})\n'
-      '• Телеграм: @${widget.profile.external_name}\n'
-      '• Координаты: ${_position?.latitude.toStringAsFixed(4)}, ${_position?.longitude.toStringAsFixed(4)}\n\n'
-      '‼️ НЕМЕДЛЕННО СВЯЖИТЕСЬ С ИГРОКОМ ДЛЯ ПРОВЕДЕНИЯ СЦЕНКИ ЗАХВАТА! ‼️';
+        '‼️‼️‼️ ЗАПРОС НА ЗАХВАТ ДОМЕНА ‼️‼️‼️\n\n'
+            '🚨 ВНИМАНИЕ МАСТЕРАМ! 🚨\n\n'
+            'Игрок ${widget.profile.characterName} хочет захватить домен!\n'
+            '• Домен: ${_currentDomain.name} (ID: ${_currentDomain.id})\n'
+            '• Способ: $method\n'
+            '• Игрок: ${widget.profile.characterName} (${widget.profile.clan}, ${widget.profile.sect})\n'
+            '• Телеграм: @${widget.profile.external_name}\n'
+            '• Координаты: ${_position?.latitude.toStringAsFixed(4)}, ${_position?.longitude.toStringAsFixed(4)}\n\n'
+            '‼️ НЕМЕДЛЕННО СВЯЖИТЕСЬ С ИГРОКОМ ДЛЯ ПРОВЕДЕНИЯ СЦЕНКИ ЗАХВАТА! ‼️';
 
-    sendDebugToTelegram(message);
+    sendTelegramMode(chatId: '369397714', message: message, mode: 'debug');
 
     // Дополнительно можно отправить уведомление в другой канал или сделать звонок API
     // для отправки SMS/email уведомлений мастерам
@@ -400,14 +382,12 @@ void _checkAndShowNeutralDialog() async {
         _position = pos;
         _mapController.move(LatLng(pos.latitude, pos.longitude), 15);
       });
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка получения геолокации: $e');
     } finally {
       setState(() => _isLoadingLocation = false);
     }
   }
 
-@override
+  @override
   Widget build(BuildContext context) {
     if (_currentDomain == null) {
       return Scaffold(
@@ -597,7 +577,7 @@ void _checkAndShowNeutralDialog() async {
                       _buildInfoRow('Доход', '${_currentDomain!.income} пунктов голода в день'),
                       _buildInfoRow('Координаты',
                           '${_currentDomain!.latitude.toStringAsFixed(4)}, '
-                          '${_currentDomain!.longitude.toStringAsFixed(4)}'),
+                              '${_currentDomain!.longitude.toStringAsFixed(4)}'),
                     ],
                   ),
                 ),
@@ -628,22 +608,12 @@ void _checkAndShowNeutralDialog() async {
                         ],
                       ),
                       const SizedBox(height: 15),
-                      Row(
-                        children: [
-                          _buildStatItem(
-                            icon: Icons.attach_money,
-                            color: const Color(0xFF006400),
-                            title: 'Доход',
-                            value: '${_currentDomain!.income}/день',
-                          ),
-                          const SizedBox(width: 15),
-                          _buildStatItem(
-                            icon: Icons.warning,
-                            color: const Color(0xFF8b0000),
-                            title: 'Нарушения',
-                            value: _currentDomain!.openViolationsCount.toString(),
-                          ),
-                        ],
+                      // Доход по центру (убраны нарушения)
+                      _buildCenteredStatItem(
+                        //icon: Icons.attach_money,
+                        color: const Color(0xFF006400),
+                        title: 'Доход',
+                        value: '${_currentDomain!.income}/день',
                       ),
                     ],
                   ),
@@ -677,622 +647,721 @@ void _checkAndShowNeutralDialog() async {
     );
   }
 
-Widget _buildSection({required String title, required IconData icon, required Widget child}) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Row(
+  // Новый метод для создания центрированного элемента статистики
+  Widget _buildCenteredStatItem({
+    //required IconData icon,
+    required Color color,
+    required String title,
+    required String value,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center, // Центрирование по горизонтали
         children: [
-          Icon(icon, color: const Color(0xFFd4af37), size: 20),
-          const SizedBox(width: 8),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFFd4af37),
-              letterSpacing: 1,
-            ),
-          ),
-        ],
-      ),
-      const SizedBox(height: 12),
-      Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFF1a0000).withOpacity(0.8),
-          borderRadius: BorderRadius.circular(15),
-          border: Border.all(color: const Color(0xFFd4af37).withOpacity(0.3)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.5),
-              spreadRadius: 1,
-              blurRadius: 5,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: child,
-        ),
-      ),
-
-
-    ],
-  );
-}
-
-Widget _buildDomainManagementSection() {
-  final domain = _currentDomain;
-  if (domain == null) return const SizedBox();
-
-  return _buildSection(
-    title: 'УПРАВЛЕНИЕ ДОМЕНОМ',
-    icon: Icons.admin_panel_settings,
-    child: Column(
-      children: [
-        // Информация о владении
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1a0000),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFd4af37).withOpacity(0.3)),
-          ),
-          child: Column(
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center, // Центрирование иконки и заголовка
             children: [
-              const Text(
-                'Текущий владелец',
-                style: TextStyle(
-                  color: Color(0xFFd4af37),
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
+              //Icon(icon, size: 20, color: color),
+              const SizedBox(width: 8),
               Text(
-                  domain.ownerId.isNotEmpty ? _ownerName ?? domain.ownerId : 'Не назначен',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 16,
-                  ),
-                  textAlign: TextAlign.center,
+                title,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                  color: color,
+                ),
               ),
             ],
           ),
-        ),
-
-        const SizedBox(height: 20),
-
-        // Кнопка передачи домена
-        ElevatedButton.icon(
-  onPressed: () => _showTransferDialog(context), // Изменено на _showTransferDialog
-  icon: const Icon(Icons.swap_horiz, size: 24),
-  label: const Text(
-    'ПЕРЕДАТЬ ДОМЕН ДРУГОМУ ИГРОКУ',
-            style: TextStyle(fontSize: 16),
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF1a0000),
-            foregroundColor: const Color(0xFFd4af37),
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-            minimumSize: const Size(double.infinity, 60),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: const BorderSide(color: Color(0xFF8b0000), width: 2),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: color,
             ),
-            elevation: 5,
-            shadowColor: Colors.black.withOpacity(0.5),
-          ),
-        ),
-
-        const SizedBox(height: 12),
-      ],
-    ),
-  );
-}
-
-void _showTransferDialog(BuildContext context) async {
-  final players = await context.read<ProfileBloc>().getPlayers();
-
-  // Фильтруем, исключая текущего владельца
-  final availablePlayers = players.where((p) => p.id != _currentDomain!.ownerId).toList();
-
-  if (availablePlayers.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Нет других игроков для передачи домена'),
-        backgroundColor: Colors.orange,
-      ),
-    );
-    return;
-  }
-
-  // Показываем диалог выбора игрока
-  final selectedPlayer = await showDialog<ProfileModel>(
-    context: context,
-    builder: (context) => AlertDialog(
-      backgroundColor: const Color(0xFF1a0000),
-      title: const Text(
-        'ПЕРЕДАТЬ ДОМЕН',
-        style: TextStyle(color: Color(0xFFd4af37)),
-      ),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: availablePlayers.length,
-          itemBuilder: (context, index) {
-            final player = availablePlayers[index];
-            return ListTile(
-              title: Text(
-                player.characterName,
-                style: const TextStyle(color: Colors.white70),
-              ),
-              subtitle: Text(
-                '${player.clan}, ${player.sect}',
-                style: const TextStyle(color: Colors.grey),
-              ),
-              onTap: () => Navigator.pop(context, player),
-            );
-          },
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Отмена', style: TextStyle(color: Colors.white70)),
-        ),
-      ],
-    ),
-  );
-
-  if (selectedPlayer != null) {
-    // Подтверждаем передачу
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1a0000),
-        title: const Text(
-          'Подтверждение',
-          style: TextStyle(color: Color(0xFFd4af37)),
-        ),
-        content: Text(
-          'Вы уверены, что хотите передать домен "${_currentDomain!.name}" игроку ${selectedPlayer.characterName}?',
-          style: const TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Отмена', style: TextStyle(color: Colors.white70)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Подтвердить', style: TextStyle(color: Color(0xFFd4af37))),
           ),
         ],
       ),
     );
-
-    if (confirmed == true) {
-      _performDomainTransfer(context, selectedPlayer);
-    }
   }
-}
 
-void _performDomainTransfer(BuildContext context, ProfileModel recipient) async {
-  final domain = _currentDomain;
-  if (domain == null) return;
-
-  try {
-    // Выполняем передачу домена
-    final repository = context.read<DomainBloc>().repository;
-    final domainBloc = context.read<DomainBloc>();
-    final profileBloc = context.read<ProfileBloc>();
-
-    await repository.transferDomain(domain.id.toString(), recipient.id);
-
-    // Обновляем DomainBloc - загружаем свежие данные
-    domainBloc.add(LoadDomains());
-
-    // Обновляем ProfileBloc для текущего пользователя
-    final currentProfileState = profileBloc.state;
-    if (currentProfileState is ProfileLoaded) {
-      final currentProfile = currentProfileState.profile;
-      final freshProfile = await repository.getProfileById(currentProfile.id);
-      if (freshProfile != null) {
-        profileBloc.add(SetProfile(freshProfile));
-      }
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Домен "${domain.name}" передан ${recipient.characterName}'),
-        backgroundColor: Colors.green[800],
-      ),
-    );
-
-    // Возвращаемся на предыдущий экран
-    Navigator.of(context).pop();
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Ошибка передачи домена: ${e.toString()}'),
-        backgroundColor: Colors.red[800],
-      ),
-    );
-  }
-}
-
-Widget _buildHungerManagementSection() {
-  final domain = _currentDomain;
-  if (domain == null) return const SizedBox();
-
-  return _buildSection(
-    title: 'УПРАВЛЕНИЕ ГОЛОДОМ',
-    icon: Icons.restaurant,
-    child: Column(
+  Widget _buildSection({required String title, required IconData icon, required Widget child}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Индикатор доступного голода из baseIncome
-        _buildStatIndicator(
-          'Доступный голод домена',
-          '${domain.baseIncome} пунктов',
-          domain.baseIncome / 10, // Предполагаем макс. 10 для прогресса
-          const Color(0xFF8b0000),
-          Icons.attach_money,
-        ),
-
-        const SizedBox(height: 20),
-
-        // Кнопка "Накормить"
-        ElevatedButton.icon(
-          onPressed: () => _showFeedDialog(context),
-          icon: const Icon(Icons.restaurant, size: 24),
-          label: const Text(
-            'НАКОРМИТЬ',
-            style: TextStyle(fontSize: 16),
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF1a0000),
-            foregroundColor: const Color(0xFFd4af37),
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-            minimumSize: const Size(double.infinity, 60),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: const BorderSide(color: Color(0xFF8b0000), width: 2),
+        Row(
+          children: [
+            Icon(icon, color: const Color(0xFFd4af37), size: 20),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFd4af37),
+                letterSpacing: 1,
+              ),
             ),
-            elevation: 5,
-            shadowColor: Colors.black.withOpacity(0.5),
-          ),
+          ],
         ),
-
-        const SizedBox(height: 15),
-
-        // Информация
+        const SizedBox(height: 12),
         Container(
-          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFF1a0000),
-            borderRadius: BorderRadius.circular(10),
+            color: const Color(0xFF1a0000).withOpacity(0.8),
+            borderRadius: BorderRadius.circular(15),
             border: Border.all(color: const Color(0xFFd4af37).withOpacity(0.3)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.5),
+                spreadRadius: 1,
+                blurRadius: 5,
+                offset: const Offset(0, 3),
+              ),
+            ],
           ),
-          child: const Text(
-            'Использовать доступный голод домена для кормления других игроков.',
-            style: TextStyle(
-              fontSize: 12,
-              color: Color(0xFFd4af37),
-              height: 1.5,
-            ),
-            textAlign: TextAlign.center,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: child,
           ),
         ),
+
+
       ],
-    ),
-  );
-}
+    );
+  }
 
-// Добавляем новый метод для показа диалога выбора игрока
-void _showFeedDialog(BuildContext context) async {
-  // Получаем список всех игроков
-  final players = await context.read<ProfileBloc>().getPlayers();
+  Widget _buildDomainManagementSection() {
+    final domain = _currentDomain;
+    if (domain == null) return const SizedBox();
 
-  // Сортируем по имени персонажа
-  players.sort((a, b) => a.characterName.compareTo(b.characterName));
-
-  // Выбранный игрок (изначально null)
-  ProfileModel? selectedPlayer;
-
-  // Контроллер для поиска
-  final searchController = TextEditingController();
-
-  // Показываем диалог выбора игрока
-  await showDialog(
-    context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setState) {
-        // Фильтруем игроков по поисковому запросу
-        final filteredPlayers = searchController.text.isEmpty
-            ? players
-            : players.where((player) =>
-                player.characterName.toLowerCase().contains(
-                  searchController.text.toLowerCase()
-                )).toList();
-
-        return AlertDialog(
-          title: const Text('Выберите игрока'),
-          content: SizedBox(
-            width: double.maxFinite,
+    return _buildSection(
+      title: 'УПРАВЛЕНИЕ ДОМЕНОМ',
+      icon: Icons.admin_panel_settings,
+      child: Column(
+        children: [
+          // Информация о владении
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1a0000),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFd4af37).withOpacity(0.3)),
+            ),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                // Поле поиска
-                TextField(
-                  controller: searchController,
-                  decoration: const InputDecoration(
-                    hintText: 'Поиск по имени...',
-                    prefixIcon: Icon(Icons.search),
+                const Text(
+                  'Текущий владелец',
+                  style: TextStyle(
+                    color: Color(0xFFd4af37),
+                    fontWeight: FontWeight.bold,
                   ),
-                  onChanged: (value) => setState(() {}),
                 ),
-                const SizedBox(height: 16),
-
-                // Список игроков
-                SizedBox(
-                  height: 300,
-                  width: double.maxFinite,
-                  child: ListView.builder(
-                    itemCount: filteredPlayers.length,
-                    itemBuilder: (context, index) {
-                      final player = filteredPlayers[index];
-                      return ListTile(
-                        leading: const Icon(Icons.person),
-                        title: Text(player.characterName),
-                        selected: selectedPlayer?.id == player.id,
-                        onTap: () {
-                          setState(() {
-                            selectedPlayer = player;
-                          });
-                        },
-                      );
-                    },
-                  ),
+                const SizedBox(height: 8),
+                Text(
+                    domain.ownerId.isNotEmpty ? _ownerName ?? domain.ownerId : 'Не назначен',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 16,
+                    ),
+                    textAlign: TextAlign.center,
                 ),
               ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Отмена'),
+
+          const SizedBox(height: 20),
+
+          // Кнопка передачи домена
+          ElevatedButton.icon(
+            onPressed: () => _showTransferDialog(context),
+            icon: const Icon(Icons.swap_horiz, size: 24),
+            label: const Text(
+              'ПЕРЕДАТЬ ДОМЕН ДРУГОМУ ИГРОКУ',
+              style: TextStyle(fontSize: 16),
             ),
-            ElevatedButton(
-              onPressed: selectedPlayer != null
-                  ? () {
-                      Navigator.pop(context);
-                      _showAmountDialog(context, selectedPlayer!);
-                    }
-                  : null,
-              child: const Text('Далее'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1a0000),
+              foregroundColor: const Color(0xFFd4af37),
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+              minimumSize: const Size(double.infinity, 60),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: Color(0xFF8b0000), width: 2),
+              ),
+              elevation: 5,
+              shadowColor: Colors.black.withOpacity(0.5),
             ),
-          ],
-        );
-      },
-    ),
-  );
-}
-
-// Добавляем метод для показа диалога выбора количества голода
-void _showAmountDialog(BuildContext context, ProfileModel targetPlayer) async {
-  final domain = _currentDomain;
-  if (domain == null) return;
-
-  int amount = 1;
-
-  await showDialog(
-    context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setState) {
-        return AlertDialog(
-          title: Text('Накормить ${targetPlayer.characterName}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Сколько пунктов голода передать?'),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.remove),
-                    onPressed: () {
-                      if (amount > 1) {
-                        setState(() => amount--);
-                      }
-                    },
-                  ),
-                  Text(
-                    '$amount',
-                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.add),
-                    onPressed: () {
-                      // Ограничиваем максимальное значение baseIncome домена
-                      if (amount < domain.baseIncome) {
-                        setState(() => amount++);
-                      }
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Максимум: ${domain.baseIncome} (доступно в домене)',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Отмена'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _transferHunger(context, targetPlayer, amount);
-              },
-              child: const Text('Подтвердить'),
-            ),
-          ],
-        );
-      },
-    ),
-  );
-}
 
-// Добавляем метод для передачи голода
-void _transferHunger(BuildContext context, ProfileModel targetPlayer, int amount) async {
-  try {
-    final repository = context.read<DomainBloc>().repository;
-    final domainBloc = context.read<DomainBloc>();
-    final profileBloc = context.read<ProfileBloc>();
-    final domain = _currentDomain!;
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
 
-    // Проверяем, что достаточно baseIncome
-    if (domain.baseIncome < amount) {
+  void _showTransferDialog(BuildContext context) async {
+    final players = await context.read<ProfileBloc>().getPlayers();
+
+    // Фильтруем, исключая текущего владельца
+    final availablePlayers = players.where((p) => p.id != _currentDomain!.ownerId).toList();
+
+    if (availablePlayers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Недостаточно доступного голода в домене'),
-          backgroundColor: Colors.red,
+          content: Text('Нет других игроков для передачи домена'),
+          backgroundColor: Colors.orange,
         ),
       );
       return;
     }
 
-    // Используем метод репозитория вместо прямого вызова RPC
-    final result = await repository.transferHungerFromDomain(
-      domain.id,
-      targetPlayer.id,
-      amount
+    // Показываем диалог выбора игрока
+    final selectedPlayer = await showDialog<ProfileModel>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a0000),
+        title: const Text(
+          'ПЕРЕДАТЬ ДОМЕН',
+          style: TextStyle(color: Color(0xFFd4af37)),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: availablePlayers.length,
+            itemBuilder: (context, index) {
+              final player = availablePlayers[index];
+              return ListTile(
+                title: Text(
+                  player.characterName,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                subtitle: Text(
+                  '${player.clan}, ${player.sect}',
+                  style: const TextStyle(color: Colors.grey),
+                ),
+                onTap: () => Navigator.pop(context, player),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Отмена', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
     );
 
-    if (result != null) {
-      // Обновляем локальное состояние домена
-      final newBaseIncome = domain.baseIncome - amount;
-      setState(() {
-        _currentDomain = _currentDomain!.copyWith(baseIncome: newBaseIncome);
-      });
+    if (selectedPlayer != null) {
+      // Подтверждаем передачу
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF1a0000),
+          title: const Text(
+            'Подтверждение',
+            style: TextStyle(color: Color(0xFFd4af37)),
+          ),
+          content: Text(
+            'Вы уверены, что хотите передать домен "${_currentDomain!.name}" игроку ${selectedPlayer.characterName}?',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена', style: TextStyle(color: Colors.white70)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Подтвердить', style: TextStyle(color: Color(0xFFd4af37))),
+            ),
+          ],
+        ),
+      );
 
-      // Обновляем DomainBloc
-      domainBloc.add(UpdateDomainBaseIncome(domain.id, newBaseIncome));
+      if (confirmed == true) {
+        _performDomainTransfer(context, selectedPlayer);
+      }
+    }
+  }
 
-      // Если целевой игрок - текущий пользователь, обновляем его голод
-      if (targetPlayer.id == widget.profile.id) {
-        final newHunger = targetPlayer.hunger - amount;
-        profileBloc.add(UpdateHunger(newHunger > 0 ? newHunger : 0));
+  void _performDomainTransfer(BuildContext context, ProfileModel recipient) async {
+    final domain = _currentDomain;
+    if (domain == null) return;
+
+    try {
+      // Выполняем передачу домена
+      final repository = context.read<DomainBloc>().repository;
+      final domainBloc = context.read<DomainBloc>();
+      final profileBloc = context.read<ProfileBloc>();
+
+      await repository.transferDomain(domain.id.toString(), recipient.id);
+
+      // Обновляем DomainBloc - загружаем свежие данные
+      domainBloc.add(LoadDomains());
+
+      // Обновляем ProfileBloc для текущего пользователя
+      final currentProfileState = profileBloc.state;
+      if (currentProfileState is ProfileLoaded) {
+        final currentProfile = currentProfileState.profile;
+        final freshProfile = await repository.getProfileById(currentProfile.id);
+        if (freshProfile != null) {
+          profileBloc.add(SetProfile(freshProfile));
+        }
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('$amount пунктов голода переданы ${targetPlayer.characterName}'),
-          backgroundColor: Colors.green,
+          content: Text('Домен "${domain.name}" передан ${recipient.characterName}'),
+          backgroundColor: Colors.green[800],
         ),
       );
-    } else {
+
+      // Возвращаемся на предыдущий экран
+      Navigator.of(context).pop();
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Ошибка передачи голода'),
+        SnackBar(
+          content: Text('Ошибка передачи домена: ${e.toString()}'),
+          backgroundColor: Colors.red[800],
+        ),
+      );
+    }
+  }
+
+  Widget _buildHungerManagementSection() {
+    final domain = _currentDomain;
+    if (domain == null) return const SizedBox();
+
+    return _buildSection(
+      title: 'УПРАВЛЕНИЕ ГОЛОДОМ',
+      icon: Icons.restaurant,
+      child: Column(
+        children: [
+          // Индикатор доступного голода из baseIncome
+          _buildStatIndicator(
+            'Доступный голод домена',
+            '${domain.baseIncome} пунктов',
+            domain.baseIncome / 10,
+            const Color(0xFF8b0000),
+            Icons.attach_money,
+          ),
+
+          const SizedBox(height: 20),
+
+          // Кнопка "Накормить"
+          ElevatedButton.icon(
+            onPressed: () => _showFeedDialog(context),
+            icon: const Icon(Icons.restaurant, size: 24),
+            label: const Text(
+              'НАКОРМИТЬ',
+              style: TextStyle(fontSize: 16),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1a0000),
+              foregroundColor: const Color(0xFFd4af37),
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+              minimumSize: const Size(double.infinity, 60),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: Color(0xFF8b0000), width: 2),
+              ),
+              elevation: 5,
+              shadowColor: Colors.black.withOpacity(0.5),
+            ),
+          ),
+
+          const SizedBox(height: 15),
+
+          // Информация
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1a0000),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFd4af37).withOpacity(0.3)),
+            ),
+            child: const Text(
+              'Использовать доступный голод домена для кормления других игроков.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Color(0xFFd4af37),
+                height: 1.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFeedDialog(BuildContext context) async {
+    // Получаем список всех игроков
+    final players = await context.read<ProfileBloc>().getPlayers();
+
+    // Сортируем по имени персонажа
+    players.sort((a, b) => a.characterName.compareTo(b.characterName));
+
+    // Выбранный игрок (изначально null)
+    ProfileModel? selectedPlayer;
+
+    // Контроллер для поиска
+    final searchController = TextEditingController();
+
+    // Показываем диалог выбора игрока
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          // Фильтруем игроков по поисковому запросу
+          final filteredPlayers = searchController.text.isEmpty
+              ? players
+              : players.where((player) =>
+                  player.characterName.toLowerCase().contains(
+                    searchController.text.toLowerCase()
+                  )).toList();
+
+          return AlertDialog(
+            title: const Text('Выберите игрока'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Поле поиска
+                  TextField(
+                    controller: searchController,
+                    decoration: const InputDecoration(
+                      hintText: 'Поиск по имени...',
+                      prefixIcon: Icon(Icons.search),
+                    ),
+                    onChanged: (value) => setState(() {}),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Список игроков
+                  SizedBox(
+                    height: 300,
+                    width: double.maxFinite,
+                    child: ListView.builder(
+                      itemCount: filteredPlayers.length,
+                      itemBuilder: (context, index) {
+                        final player = filteredPlayers[index];
+                        return ListTile(
+                          leading: const Icon(Icons.person),
+                          title: Text(player.characterName),
+                          selected: selectedPlayer?.id == player.id,
+                          onTap: () {
+                            setState(() {
+                              selectedPlayer = player;
+                            });
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Отмена'),
+              ),
+              ElevatedButton(
+                onPressed: selectedPlayer != null
+                    ? () {
+                        Navigator.pop(context);
+                        _showAmountDialog(context, selectedPlayer!);
+                      }
+                    : null,
+                child: const Text('Далее'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showAmountDialog(BuildContext context, ProfileModel targetPlayer) async {
+    final domain = _currentDomain;
+    if (domain == null) return;
+
+    int amount = 1;
+    int maxAllowed = targetPlayer.hunger;
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: Text('Накормить ${targetPlayer.characterName}'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Сколько пунктов голода передать?'),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.remove),
+                      onPressed: () {
+                        if (amount > 1) {
+                          setState(() => amount--);
+                        }
+                      },
+                    ),
+                    Text(
+                      '$amount',
+                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add),
+                      onPressed: () {
+                        if (amount < domain.baseIncome) {
+                          setState(() => amount++);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Максимум: ${domain.baseIncome} (доступно в домене)',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Отмена'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  // Загружаем свежие данные получателя для окончательной проверки
+                  final freshTarget = await context.read<DomainBloc>().repository.getProfileById(targetPlayer.id);
+
+                  if (freshTarget == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('❌ Ошибка: игрок не найден'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+
+                  // Обновляем maxAllowed на основе свежих данных
+                  final currentMaxAllowed = freshTarget.hunger;
+
+                  if (amount > currentMaxAllowed) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Нельзя передать столько крови, '
+                          'выберите меньше',
+                        ),
+                        backgroundColor: Colors.red,
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  } else {
+                    Navigator.pop(context);
+                    _transferHunger(context, targetPlayer, amount);
+                  }
+                },
+                child: const Text('Подтвердить'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _transferHunger(BuildContext context, ProfileModel targetPlayer, int amount) async {
+    try {
+      final repository = context.read<DomainBloc>().repository;
+      final domainBloc = context.read<DomainBloc>();
+      final profileBloc = context.read<ProfileBloc>();
+      final domain = _currentDomain;
+
+      // Загружаем свежие данные получателя
+      final freshTarget = await repository.getProfileById(targetPlayer.id);
+      if (freshTarget == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ошибка: игрок не найден'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      if (domain.baseIncome < amount) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Недостаточно доступного голода в домене'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final result = await repository.transferHungerFromDomain(
+        domain.id,
+        targetPlayer.id,
+        amount
+      );
+
+      if (result != null && result['success'] == true) {
+        final newBaseIncome = domain.baseIncome - amount;
+        setState(() {
+          _currentDomain = _currentDomain!.copyWith(baseIncome: newBaseIncome);
+        });
+
+        domainBloc.add(UpdateDomainBaseIncome(domain.id, newBaseIncome));
+
+        final newHunger = freshTarget.hunger + amount;
+
+        // Обновляем состояние получателя
+        if (targetPlayer.id == widget.profile.id) {
+          profileBloc.add(UpdateHunger(newHunger));
+
+          // Принудительно обновляем главный экран
+          context.read<ProfileBloc>().add(UpdateProfile(
+            widget.profile.copyWith(hunger: newHunger)
+          ));
+        } else {
+          await repository.updateHunger(targetPlayer.id, newHunger);
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$amount пунктов голода переданы ${freshTarget.characterName}'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ошибка передачи голода'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Ошибка передачи голода: $e'),
           backgroundColor: Colors.red,
         ),
       );
     }
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Ошибка передачи голода: $e'),
-        backgroundColor: Colors.red,
-      ),
-    );
   }
-}
 
-Widget _buildProtectionManagementSection() {
-  final domain = _currentDomain;
-  if (domain == null) return const SizedBox();
+  Widget _buildProtectionManagementSection() {
+    final domain = _currentDomain;
+    if (domain == null) return const SizedBox();
 
-  final currentProtection = domain.securityLevel;
-  final maxProtection = domain.maxSecurityLevel;
-  final currentInfluence = domain.influenceLevel;
-  final maxInfluence = domain.maxinfluenceLevel;
+    final currentProtection = domain.securityLevel;
+    final maxProtection = domain.maxSecurityLevel;
+    final currentInfluence = domain.influenceLevel;
+    final maxInfluence = domain.maxinfluenceLevel;
+    final bool isMaxProtectionReached = maxProtection >= 10;
 
-  return _buildSection(
-    title: 'УПРАВЛЕНИЕ ЗАЩИТОЙ',
-    icon: Icons.shield,
-    child: Column(
-      children: [
-        // Индикаторы защиты и влияния
-        Row(
-          children: [
-            Expanded(
-              child: _buildStatIndicator(
-                'Защита',
-                '$currentProtection/$maxProtection',
-                currentProtection / maxProtection,
-                const Color(0xFF8b0000),
-                Icons.security,
-              ),
-            ),
-            const SizedBox(width: 15),
-            Expanded(
-              child: _buildStatIndicator(
-                'Влияние',
-                '$currentInfluence/$maxInfluence',
-                currentInfluence / maxInfluence,
-                const Color(0xFFd4af37),
-                Icons.auto_awesome,
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 20),
-
-        // Кнопки управления
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: () => _restoreProtection(context),
-                icon: const Icon(Icons.shield, size: 20),
-                label: const Text('Восстановить'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1a0000),
-                  foregroundColor: const Color(0xFFd4af37),
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    side: const BorderSide(color: Color(0xFFd4af37), width: 1),
-                  ),
-                  elevation: 5,
-                  shadowColor: Colors.black.withOpacity(0.5),
+    return _buildSection(
+      title: 'УПРАВЛЕНИЕ ЗАЩИТОЙ',
+      icon: Icons.shield,
+      child: Column(
+        children: [
+          // Индикаторы защиты и влияния
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatIndicator(
+                  'Защита',
+                  '$currentProtection/$maxProtection',
+                  currentProtection / maxProtection,
+                  const Color(0xFF8b0000),
+                  Icons.security,
                 ),
               ),
-            ),
-            const SizedBox(width: 10),
+              const SizedBox(width: 15),
+              Expanded(
+                child: _buildStatIndicator(
+                  'Влияние',
+                  '$currentInfluence/$maxInfluence',
+                  currentInfluence / maxInfluence,
+                  const Color(0xFFd4af37),
+                  Icons.auto_awesome,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          // Кнопки управления
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _restoreProtection(context),
+                  icon: const Icon(Icons.shield, size: 20),
+                  label: const Text('Восстановить'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1a0000),
+                    foregroundColor: const Color(0xFFd4af37),
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: const BorderSide(color: Color(0xFFd4af37), width: 1),
+                    ),
+                    elevation: 5,
+                    shadowColor: Colors.black.withOpacity(0.5),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
             Expanded(
               child: ElevatedButton.icon(
-                onPressed: () => _upgradeProtection(context),
+                onPressed: isMaxProtectionReached 
+                  ? null  // Отключаем кнопку при достижении максимума
+                  : () => _upgradeProtection(context),
                 icon: const Icon(Icons.enhanced_encryption, size: 20),
-                label: const Text('Повысить'),
+                label: Text(isMaxProtectionReached ? 'Максимум' : 'Повысить'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1a0000),
+                  backgroundColor: isMaxProtectionReached 
+                    ? Colors.grey[700]  // Серый цвет для неактивной кнопки
+                    : const Color(0xFF1a0000),
                   foregroundColor: const Color(0xFFd4af37),
                   padding: const EdgeInsets.symmetric(vertical: 15),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
-                    side: const BorderSide(color: Color(0xFFd4af37), width: 1),
+                    side: BorderSide(
+                      color: isMaxProtectionReached 
+                        ? Colors.grey[600]!  // Серый бордер для неактивной кнопки
+                        : const Color(0xFFd4af37), 
+                      width: 1
+                    ),
                   ),
-                  elevation: 5,
+                  elevation: isMaxProtectionReached ? 0 : 5,  // Убираем тень у неактивной кнопки
                   shadowColor: Colors.black.withOpacity(0.5),
                 ),
               ),
@@ -1310,12 +1379,13 @@ Widget _buildProtectionManagementSection() {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: const Color(0xFFd4af37).withOpacity(0.3)),
           ),
-          child: const Text(
-            'Восстановление: 2 влияния → 1 защита\n'
-            'Повышение: 4 влияния → +1 к максимуму',
+          child: Text(
+            isMaxProtectionReached
+              ? 'Восстановление: 2 влияния → 1 защита\nДостигнут максимальный уровень защиты (10)'
+              : 'Восстановление: 2 влияния → 1 защита\nПовышение: 4 влияния → +1 к максимуму',
             style: TextStyle(
               fontSize: 12,
-              color: Color(0xFFd4af37),
+              color: const Color(0xFFd4af37),
               height: 1.5,
             ),
             textAlign: TextAlign.center,
@@ -1326,55 +1396,54 @@ Widget _buildProtectionManagementSection() {
   );
 }
 
-// Вспомогательный метод для создания индикаторов статистики
-Widget _buildStatIndicator(String title, String value, double progress, Color color, IconData icon) {
-  return Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: const Color(0xFF1a0000),
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: const Color(0xFFd4af37).withOpacity(0.3)),
-    ),
-    child: Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 16, color: color),
-            const SizedBox(width: 6),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: color,
+  Widget _buildStatIndicator(String title, String value, double progress, Color color, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1a0000),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFd4af37).withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: 6),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: color,
+            ],
           ),
-        ),
-        const SizedBox(height: 8),
-        LinearProgressIndicator(
-          value: progress,
-          backgroundColor: Colors.grey[800],
-          color: color,
-          minHeight: 6,
-          borderRadius: BorderRadius.circular(3),
-        ),
-      ],
-    ),
-  );
-}
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(
+            value: progress,
+            backgroundColor: Colors.grey[800],
+            color: color,
+            minHeight: 6,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ],
+      ),
+    );
+  }
 
-Widget _buildInfoRow(String title, String value) {
+  Widget _buildInfoRow(String title, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -1401,210 +1470,149 @@ Widget _buildInfoRow(String title, String value) {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  // Новый метод: Выбор игрока для передачи голода
-  void _selectPlayerForHungerTransfer(BuildContext context, int amount) async {
-    final players = await context.read<ProfileBloc>().getPlayers();
-    players.sort((a, b) => a.characterName.compareTo(b.characterName));
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Выберите получателя'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: players.length,
-            itemBuilder: (context, index) {
-              final player = players[index];
-              return ListTile(
-                title: Text(player.characterName),
-                onTap: () {
-                  Navigator.pop(context);
-                  _confirmHungerTransfer(context, amount, player);
-                },
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Новый метод: Подтверждение передачи голода
-  void _confirmHungerTransfer(BuildContext context, int amount, ProfileModel recipient) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Подтверждение передачи'),
-        content: Text(
-          'Вы хотите передать $amount пунктов голода игроку ${recipient.characterName}?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Отмена'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                await context.read<DomainBloc>().repository.transferHunger(
-                  fromUserId: widget.profile.id,
-                  toUserId: recipient.id,
-                  amount: amount,
-                );
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('$amount пунктов голода переданы ${recipient.characterName}'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Ошибка передачи голода'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text('Подтвердить'),
-          ),
-        ],
-      ),
-    );
+      ));
   }
 
   void _restoreProtection(BuildContext context) async {
+    final domain = _currentDomain;
+    if (domain == null) return;
+
+    int amount = 1;
+    final int availableInfluence = domain.influenceLevel;
+    final int currentProtection = domain.securityLevel;
+    final int maxProtection = domain.maxSecurityLevel;
+    final int maxRestorable = (availableInfluence / 2).floor();
+    final int maxFromProtection = maxProtection - currentProtection;
+    final int maxAmount = maxRestorable > maxFromProtection ? maxFromProtection : maxRestorable;
+
+    if (maxAmount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Недостаточно влияния для восстановления защиты или защита уже максимальна'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Показываем диалог
+    final result = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        int tempAmount = amount;
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return SimpleDialog(
+              title: const Text('Восстановление защиты'),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      Text('Доступно влияния: $availableInfluence/${domain.maxinfluenceLevel}'),
+                      const SizedBox(height: 10),
+                      Text('Текущая защита: $currentProtection/$maxProtection'),
+                      const SizedBox(height: 10),
+                      const Text('Выберите количество для восстановления:'),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.remove),
+                            onPressed: () {
+                              if (tempAmount > 1) {
+                                setState(() => tempAmount--);
+                              }
+                            },
+                          ),
+                          Text('$tempAmount', style: TextStyle(fontSize: 20)),
+                          IconButton(
+                            icon: const Icon(Icons.add),
+                            onPressed: () {
+                              if (tempAmount < maxAmount) {
+                                setState(() => tempAmount++);
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text('Стоимость: ${tempAmount * 2} влияния'),
+                      Text('Будет восстановлено: $tempAmount ед. защиты'),
+                    ],
+                  ),
+                ),
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(context, tempAmount),
+                  child: const Text('Восстановить'),
+                ),
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(context, null),
+                  child: const Text('Отмена'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result == null) return;
+
+    amount = result;
+    final cost = amount * 2;
+    final newInfluence = availableInfluence - cost;
+    final newSecurity = currentProtection + amount;
+
+    try {
+      final repository = context.read<DomainBloc>().repository;
+
+      // Обновляем влияние
+      await repository.updateDomainInfluenceLevel(domain.id, newInfluence);
+
+      // Обновляем защиту
+      await repository.updateDomainSecurity(domain.id, newSecurity);
+
+      // Обновляем локальное состояние
+      setState(() {
+        _currentDomain = domain.copyWith(
+          securityLevel: newSecurity,
+          influenceLevel: newInfluence,
+        );
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Защита восстановлена на $amount ед. (потрачено $cost влияния)'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      context.read<DomainBloc>().add(LoadDomains());
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Ошибка: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+    await _refreshDomainData();
+  }
+
+  Future<void> _upgradeProtection(BuildContext context) async {
   final domain = _currentDomain;
   if (domain == null) return;
 
-  int amount = 1;
-  final int availableInfluence = domain.influenceLevel;
-  final int currentProtection = domain.securityLevel;
-  final int maxProtection = domain.maxSecurityLevel;
-  final int maxRestorable = (availableInfluence / 2).floor();
-
-  if (maxRestorable <= 0) {
+  // Проверяем, не достигнут ли уже максимальный уровень защиты (10)
+  if (domain.maxSecurityLevel >= 10) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Недостаточно влияния для восстановления защиты'),
-        backgroundColor: Colors.red,
-      ),
+      const SnackBar(content: Text('Максимальный уровень защиты уже достигнут (10)')),
     );
     return;
   }
-
-  // Показываем диалог
-  final result = await showDialog<int>(
-    context: context,
-    builder: (context) => SimpleDialog(
-      title: const Text('Восстановление защиты'),
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Text('Доступно влияния: $availableInfluence/${domain.maxinfluenceLevel}'),
-              const SizedBox(height: 10),
-              Text('Выберите количество для восстановления:'),
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.remove),
-                    onPressed: () {
-                      if (amount > 1) {
-                        amount--;
-                        Navigator.pop(context, amount);
-                      }
-                    },
-                  ),
-                  Text('$amount', style: TextStyle(fontSize: 20)),
-                  IconButton(
-                    icon: const Icon(Icons.add),
-                    onPressed: () {
-                      if (amount < maxRestorable && (currentProtection + amount) < maxProtection) {
-                        amount++;
-                        Navigator.pop(context, amount);
-                      }
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text('Стоимость: ${amount * 2} влияния'),
-            ],
-          ),
-        ),
-        SimpleDialogOption(
-          onPressed: () => Navigator.pop(context, amount),
-          child: const Text('Восстановить'),
-        ),
-        SimpleDialogOption(
-          onPressed: () => Navigator.pop(context, null),
-          child: const Text('Отмена'),
-        ),
-      ],
-    ),
-  );
-
-  if (result == null) return;
-
-  amount = result;
-  final cost = amount * 2;
-  final newInfluence = availableInfluence - cost;
-  final newSecurity = currentProtection + amount;
-
-  try {
-    // Простое обновление через репозиторий
-    final repository = context.read<DomainBloc>().repository;
-
-    // Обновляем влияние
-    await repository.updateDomainInfluenceLevel(domain.id, newInfluence);
-
-    // Обновляем защиту
-    await repository.updateDomainSecurity(domain.id, newSecurity);
-
-    // Обновляем локальное состояние
-    setState(() {
-      _currentDomain = domain.copyWith(
-        securityLevel: newSecurity,
-        influenceLevel: newInfluence,
-      );
-    });
-
-    // Показываем уведомление
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Защита восстановлена на $amount ед. (потрачено $cost влияния)'),
-        backgroundColor: Colors.green,
-      ),
-    );
-
-    // Обновляем данные в BLoC
-    context.read<DomainBloc>().add(LoadDomains());
-
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Ошибка: ${e.toString()}'),
-        backgroundColor: Colors.red,
-      ),
-    );
-  }
-  await _refreshDomainData();
-}
-
-void _upgradeProtection(BuildContext context) async {
-  final domain = _currentDomain;
-  if (domain == null) return;
 
   final availableInfluence = domain.influenceLevel;
 
@@ -1646,8 +1654,7 @@ void _upgradeProtection(BuildContext context) async {
   }
 }
 
-Future<void> _updateDomainSecurityAndInfluence(int domainId, int newSecurity, int newInfluence) async {
-  try {
+  Future<void> _updateDomainSecurityAndInfluence(int domainId, int newSecurity, int newInfluence) async {
     final repository = context.read<DomainBloc>().repository;
 
     // Обновляем безопасность
@@ -1655,39 +1662,14 @@ Future<void> _updateDomainSecurityAndInfluence(int domainId, int newSecurity, in
 
     // Обновляем влияние
     await repository.updateDomainInfluenceLevel(domainId, newInfluence);
-
-    sendDebugToTelegram('✅ Атомарное обновление: домен $domainId, защита: $newSecurity, влияние: $newInfluence');
-  } catch (e, stack) {
-    final errorMsg = '❌ Ошибка атомарного обновления домена $domainId: ${e.toString()}\n${stack.toString()}';
-    sendDebugToTelegram(errorMsg);
-    rethrow;
   }
-}
-
-Future<void> _updateDomainMaxSecurityAndInfluence(int domainId, int newMaxSecurity, int newInfluence) async {
-  try {
-    final repository = context.read<DomainBloc>().repository;
-
-    // Обновляем максимальную безопасность
-    await repository.updateDomainMaxSecurity(domainId, newMaxSecurity);
-
-    // Обновляем влияние
-    await repository.updateDomainInfluenceLevel(domainId, newInfluence);
-
-    sendDebugToTelegram('✅ Атомарное обновление макс. защиты: домен $domainId, макс. защита: $newMaxSecurity, влияние: $newInfluence');
-  } catch (e, stack) {
-    final errorMsg = '❌ Ошибка атомарного обновления макс. защиты домена $domainId: ${e.toString()}\n${stack.toString()}';
-    sendDebugToTelegram(errorMsg);
-    rethrow;
-  }
-}
 
   Widget _buildMap() {
     return BlocBuilder<MasqueradeBloc, MasqueradeState>(
       builder: (context, state) {
         List<ViolationModel> violations = [];
         if (state is ViolationsLoaded) {
-                  violations = state.violations.where((v) => v.status != ViolationStatus.closed).toList();
+          violations = state.violations.where((v) => v.status != ViolationStatus.closed).toList();
         }
 
         return FlutterMap(
@@ -1766,539 +1748,441 @@ Future<void> _updateDomainMaxSecurityAndInfluence(int domainId, int newMaxSecuri
     }
   }
 
-    Color _getViolationColor(ViolationStatus status) {
+  Color _getViolationColor(ViolationStatus status) {
     switch (status) {
       case ViolationStatus.open:
-        return Colors.yellow; // Желтый для открытых нарушений
+        return Colors.yellow;
       case ViolationStatus.closed:
-        return Colors.green; // Зеленый для закрытых нарушений
+        return Colors.green;
       case ViolationStatus.revealed:
-        return Colors.purple; // Фиолетовый для раскрытых нарушений
+        return Colors.purple;
     }
-  }
-
-  Widget _buildInfoItem(String title, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 150,
-            child: Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 16),
-            ),
-          ),
-        ],
-    )
-    );
   }
 
   Widget _buildStatItem({
-  required IconData icon,
-  required Color color,
-  required String title,
-  required String value,
-}) {
-  return Expanded(
-    child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.5)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 20, color: color),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: color,
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String value,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.5)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 20, color: color),
+                const SizedBox(width: 8),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: color,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: color,
+              ],
             ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-Widget _buildViolationCard(ViolationModel violation) {
-  final bool isClosed = violation.status == ViolationStatus.closed;
-  final bool isRevealed = violation.status == ViolationStatus.revealed;
-
-  // Проверяем, прошло ли менее 3 часов с момента создания
-  final hoursSinceCreation = DateTime.now().difference(violation.createdAt).inHours;
-  final bool withinThreeHours = hoursSinceCreation < 3;
-
-  // Кнопка "Восстановить Маскарад" отображается только для открытых нарушений
-  final bool showCloseButton = violation.status == ViolationStatus.open;
-  // Кнопка "Узнать нарушителя" отображается для нераскрытых нарушений в течение 3 часов
-  final bool showRevealButton = !isRevealed && withinThreeHours;
-
-  // Определяем цвет карточки на основе статуса нарушения
-  // Приоритет у статуса закрытия - если нарушение закрыто, оно всегда зеленое
-  Color borderColor;
-  Color backgroundColor;
-  Color textColor;
-  IconData icon;
-
-  if (isClosed) {
-    // Если нарушение закрыто, всегда зеленый, независимо от других статусов
-    borderColor = Colors.green;
-    backgroundColor = Colors.green.withOpacity(0.1);
-    textColor = Colors.green;
-    icon = Icons.check_circle;
-  } else if (isRevealed) {
-    borderColor = Colors.purple;
-    backgroundColor = Colors.purple.withOpacity(0.1);
-    textColor = Colors.purple;
-    icon = Icons.visibility;
-  } else {
-    borderColor = Colors.yellow;
-    backgroundColor = Colors.yellow.withOpacity(0.1);
-    textColor = Colors.yellow;
-    icon = Icons.warning;
-  }
-
-  return Container(
-    margin: const EdgeInsets.only(bottom: 12),
-    decoration: BoxDecoration(
-      color: backgroundColor,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(
-        color: borderColor,
-        width: 1.5,
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.5),
-          spreadRadius: 1,
-          blurRadius: 5,
-          offset: const Offset(0, 2),
-        ),
-      ],
-    ),
-    child: ExpansionTile(
-      leading: Icon(
-        icon,
-        color: borderColor,
-      ),
-      title: Text(
-        violation.description,
-        style: TextStyle(
-          color: textColor,
-          fontWeight: isClosed ? FontWeight.normal : FontWeight.bold,
-          decoration: isClosed ? TextDecoration.lineThrough : null,
-        ),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Создано: ${_formatDateTime(violation.createdAt)}',
-            style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 12),
-          ),
-          if (violation.violatorName != null)
+            const SizedBox(height: 8),
             Text(
-              'Нарушитель: ${violation.violatorName}',
-              style: TextStyle(color: textColor, fontSize: 12),
-            ),
-        ],
-      ),
-      trailing: Icon(
-        Icons.arrow_drop_down,
-        color: borderColor.withOpacity(0.7),
-      ),
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              // Информация о нарушении
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _buildViolationStat('Голод', violation.hungerSpent.toString(), Icons.local_dining, textColor),
-                  _buildViolationStat('Закрытие', '${violation.costToClose}', Icons.security, textColor),
-                  _buildViolationStat('Раскрытие', '${violation.costToReveal}', Icons.visibility, textColor),
-                ],
+              value,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: color,
               ),
-              const SizedBox(height: 16),
-
-              // Кнопки действий
-              if (showCloseButton || showRevealButton)
-                Row(
-                  children: [
-                    if (showCloseButton)
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () => _closeViolation(context, violation),
-                          icon: Icon(Icons.check_circle, size: 18, color: Colors.white),
-                          label: const Text('Восстановить Маскарад', style: TextStyle(color: Colors.white)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (showCloseButton && showRevealButton)
-                      const SizedBox(width: 10),
-                    if (showRevealButton)
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () => _revealViolator(context, violation),
-                          icon: Icon(Icons.visibility, size: 18, color: Colors.white),
-                          label: const Text('Узнать нарушителя', style: TextStyle(color: Colors.white)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.purple,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-
-              // Информация о стоимости
-              if (showCloseButton || showRevealButton)
-                const SizedBox(height: 12),
-              if (showCloseButton)
-                Text(
-                  'Стоимость закрытия: ${violation.costToClose} влияния',
-                  style: TextStyle(
-                    color: textColor,
-                    fontSize: 12,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              if (showRevealButton)
-                Text(
-                  'Стоимость раскрытия нарушителя: ${violation.costToReveal} влияния',
-                  style: TextStyle(
-                    color: textColor,
-                    fontSize: 12,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              if (!withinThreeHours && !isRevealed)
-                Text(
-                  'Узнать имя нарушителя невозможно, время истекло',
-                  style: TextStyle(
-                    color: textColor.withOpacity(0.7),
-                    fontSize: 12,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-            ],
-          ),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
-}
-
-Widget _buildViolationStat(String title, String value, IconData icon, Color color) {
-  return Column(
-    children: [
-      Icon(icon, size: 16, color: color),
-      const SizedBox(height: 4),
-      Text(title, style: TextStyle(fontSize: 10, color: color.withOpacity(0.7))),
-      Text(value, style: TextStyle(fontSize: 14, color: color)),
-    ],
-  );
-}
-
-  void _closeViolation(BuildContext context, ViolationModel violation) async {
-  final domain = _currentDomain;
-  if (domain == null) return;
-
-  // Проверяем достаточно ли влияния у домена
-  if (domain.influenceLevel < violation.costToClose) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Влияния не достаточно для закрытия этого нарушения'),
-        backgroundColor: Colors.red[800],
-        duration: const Duration(seconds: 3),
-      ),
-    );
-    return;
-  }
-
-  try {
-    // Закрываем нарушение
-    final repository = context.read<MasqueradeBloc>().repository;
-    await repository.closeViolation(violation.id, domain.ownerId);
-
-    // Обновляем влияние домена
-    final newInfluence = domain.influenceLevel - violation.costToClose;
-    await repository.updateDomainInfluenceLevel(domain.id, newInfluence);
-
-    // Обновляем состояние
-    context.read<DomainBloc>().add(UpdateDomainInfluence(domain.id, newInfluence));
-
-    // Обновляем список нарушений
-    context.read<MasqueradeBloc>().add(LoadViolationsForDomain(domain.id));
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Вы закрыли нарушение Маскарада'),
-        backgroundColor: Colors.green[800],
-        duration: const Duration(seconds: 3),
-      ),
-    );
-
-    // Обновляем данные
-    await _refreshDomainData();
-
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Ошибка: ${e.toString()}'),
-        backgroundColor: Colors.red[800],
       ),
     );
   }
-}
 
-void _revealViolator(BuildContext context, ViolationModel violation) async {
-  final domain = _currentDomain;
-  if (domain == null) return;
+  Widget _buildViolationCard(ViolationModel violation) {
+    // Определяем состояние нарушения на основе closedAt и revealedAt
+    final bool isClosed = violation.closedAt != null;
+    final bool isRevealed = violation.revealedAt != null;
+    final bool isClosedAndRevealed = isClosed && isRevealed;
 
-  // Проверяем достаточно ли влияния у ДОМЕНА (не персонажа)
-  if (domain.influenceLevel < violation.costToReveal) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Влияния домена недостаточно, чтобы узнать, кто это был'),
-        backgroundColor: Colors.red[800],
-        duration: const Duration(seconds: 3),
-      ),
-    );
-    return;
-  }
+    // Проверяем, прошло ли менее 3 часов с момента создания
+    final hoursSinceCreation = DateTime.now().difference(violation.createdAt).inHours;
+    final bool withinThreeHours = hoursSinceCreation < 3;
 
-  try {
-    // Раскрываем нарушителя
-    final repository = context.read<MasqueradeBloc>().repository;
+    // Определяем, какие кнопки показывать на основе состояния
+    final bool showCloseButton = !isClosed;
+    final bool showRevealButton = !isRevealed && withinThreeHours && !isClosedAndRevealed;
 
-    // Получаем профиль нарушителя
-    final violatorProfile = await repository.getProfileById(violation.violatorId);
-    if (violatorProfile == null) {
-      throw Exception('Профиль нарушителя не найден');
+    // Определяем цвет и иконку на основе состояния
+    Color borderColor;
+    Color backgroundColor;
+    Color textColor;
+    IconData icon;
+
+    if (isClosedAndRevealed) {
+      // Четвертое состояние: закрыто и раскрыто - зеленый, кнопок нет
+      borderColor = Colors.green;
+      backgroundColor = Colors.green.withOpacity(0.1);
+      textColor = Colors.green;
+      icon = Icons.check_circle;
+    } else if (isClosed) {
+      // Второе состояние: закрыто, но не раскрыто - зеленый
+      borderColor = Colors.green;
+      backgroundColor = Colors.green.withOpacity(0.1);
+      textColor = Colors.green;
+      icon = Icons.check_circle;
+    } else if (isRevealed) {
+      // Третье состояние: раскрыто, но не закрыто - фиолетовый
+      borderColor = Colors.purple;
+      backgroundColor = Colors.purple.withOpacity(0.1);
+      textColor = Colors.purple;
+      icon = Icons.visibility;
+    } else {
+      // Первое состояние: не закрыто и не раскрыто - желтый
+      borderColor = Colors.yellow;
+      backgroundColor = Colors.yellow.withOpacity(0.1);
+      textColor = Colors.yellow;
+      icon = Icons.warning;
     }
 
-    // Обновляем влияние ДОМЕНА (не персонажа)
-    final newInfluence = domain.influenceLevel - violation.costToReveal;
-    await repository.updateDomainInfluenceLevel(domain.id, newInfluence);
-
-    // Раскрываем нарушителя
-    await repository.revealViolation(
-      id: violation.id,
-      violatorName: violatorProfile.characterName,
-      revealedAt: DateTime.now().toIso8601String(),
-    );
-
-    // Обновляем состояние домена
-    context.read<DomainBloc>().add(UpdateDomainInfluence(domain.id, newInfluence));
-
-    // Обновляем список нарушений
-    context.read<MasqueradeBloc>().add(LoadViolationsForDomain(domain.id));
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Это нарушение маскарада совершил ${violatorProfile.characterName}'),
-        backgroundColor: Colors.green[800],
-        duration: const Duration(seconds: 5),
-      ),
-    );
-
-    // Обновляем данные
-    await _refreshDomainData();
-
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Ошибка: ${e.toString()}'),
-        backgroundColor: Colors.red[800],
-      ),
-    );
-  }
-}
-
-  void _transferDomain(BuildContext context, ProfileModel recipient) async {
-  try {
-    final repository = context.read<DomainBloc>().repository;
-    final domainBloc = context.read<DomainBloc>();
-    final domain = _currentDomain!;
-
-    // Выполняем передачу домена
-    await repository.transferDomain(domain.id.toString(), recipient.id);
-
-    // Обновляем локальное состояние
-    setState(() {
-      _currentDomain = _currentDomain!.copyWith(ownerId: recipient.id);
-    });
-
-    // Обновляем DomainBloc
-    domainBloc.add(LoadDomains());
-
-    // Обновляем данные
-    await _refreshDomainData();
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Домен "${domain.name}" передан ${recipient.characterName}'),
-        backgroundColor: Colors.green,
-      ),
-    );
-
-    // Возвращаемся назад через короткую задержку
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted) {
-        Navigator.pop(context);
-      }
-    });
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Ошибка передачи домена: $e'),
-        backgroundColor: Colors.red,
-      ),
-    );
-  }
-}
-
-  void _confirmTransfer(
-  BuildContext context,
-  int domainId,
-  ProfileModel recipient,
-) {
-  showDialog(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Подтверждение'),
-      content: Text(
-          'Вы уверены, что хотите передать домен "${_currentDomain.name}" игроку ${recipient.characterName}?'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Отмена'),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: borderColor,
+          width: 1.5,
         ),
-        TextButton(
-          onPressed: () async {
-            Navigator.pop(context);
-            try {
-              _transferDomain(context, recipient);
-            } catch (e) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Ошибка передачи домена'),
-                  backgroundColor: Colors.red,
-                ),
-              );
-            }
-          },
-          child: const Text('Подтвердить'),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5),
+            spreadRadius: 1,
+            blurRadius: 5,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ExpansionTile(
+        leading: Icon(
+          icon,
+          color: borderColor,
         ),
-      ],
-    ),
-  );
-}
-
-  Widget _buildViolationsSection() {
-  return _buildSection(
-    title: 'АКТИВНЫЕ НАРУШЕНИЯ МАСКАРАДА',
-    icon: Icons.warning_amber,
-    child: BlocBuilder<MasqueradeBloc, MasqueradeState>(
-      builder: (context, state) {
-        if (state is ViolationsLoading) {
-          return const Center(
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFd4af37)),
+        title: Text(
+          violation.description,
+          style: TextStyle(
+            color: textColor,
+            fontWeight: isClosed ? FontWeight.normal : FontWeight.bold,
+            decoration: isClosed ? TextDecoration.lineThrough : null,
+          ),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Создано: ${_formatDateTime(violation.createdAt)}',
+              style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 12),
             ),
-          );
-        }
-
-        if (state is ViolationsLoaded) {
-          final violations = state.violations
-              .where((v) => v.domainId == _currentDomain!.id)
-              .toList();
-
-          if (violations.isEmpty) {
-            return Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1a0000),
-                borderRadius: BorderRadius.circular(15),
-                border: Border.all(color: const Color(0xFFd4af37).withOpacity(0.3)),
+            if (violation.violatorName != null)
+              Text(
+                'Нарушитель: ${violation.violatorName}',
+                style: TextStyle(color: textColor, fontSize: 12),
               ),
-              child: Column(
-                children: [
-                  Icon(Icons.verified_user, size: 60, color: const Color(0xFFd4af37).withOpacity(0.7)),
-                  const SizedBox(height: 15),
-                  const Text(
-                    'Нарушений не обнаружено',
+          ],
+        ),
+        trailing: Icon(
+          Icons.arrow_drop_down,
+          color: borderColor.withOpacity(0.7),
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                // Информация о нарушении
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _buildViolationStat('Голод', violation.hungerSpent.toString(), Icons.local_dining, textColor),
+                    _buildViolationStat('Закрытие', '${violation.costToClose}', Icons.security, textColor),
+                    _buildViolationStat('Раскрытие', '${violation.costToReveal}', Icons.visibility, textColor),
+              ]),
+                const SizedBox(height: 16),
+
+                // Кнопки действий - не показываем, если нарушение закрыто и раскрыто
+                if (!isClosedAndRevealed && (showCloseButton || showRevealButton))
+                  Row(
+                    children: [
+                      if (showCloseButton)
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _closeViolation(context, violation),
+                            icon: Icon(Icons.check_circle, size: 18, color: Colors.white),
+                            label: const Text('Восстановить Маскарад', style: TextStyle(color: Colors.white)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (showCloseButton && showRevealButton)
+                        const SizedBox(width: 10),
+                      if (showRevealButton)
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _revealViolator(context, violation),
+                            icon: Icon(Icons.visibility, size: 18, color: Colors.white),
+                            label: const Text('Узнать нарушителя', style: TextStyle(color: Colors.white)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.purple,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+
+                // Информация о стоимости
+                if (!isClosedAndRevealed && (showCloseButton || showRevealButton))
+                  const SizedBox(height: 12),
+                if (showCloseButton)
+                  Text(
+                    'Стоимость закрытия: ${violation.costToClose} влияния',
                     style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white70,
+                      color: textColor,
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                if (showRevealButton)
                   Text(
-                    'На территории вашего домена всё спокойно',
-                    style: TextStyle(color: Colors.grey[400]),
-                    textAlign: TextAlign.center,
+                    'Стоимость раскрытия нарушителя: ${violation.costToReveal} влияния',
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                    ),
                   ),
-                ],
+                if (!withinThreeHours && !isRevealed)
+                  Text(
+                    'Узнать имя нарушителя невозможно, время истекло',
+                    style: TextStyle(
+                      color: textColor.withOpacity(0.7),
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildViolationStat(String title, String value, IconData icon, Color color) {
+    return Column(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(height: 4),
+        Text(title, style: TextStyle(fontSize: 10, color: color.withOpacity(0.7))),
+        Text(value, style: TextStyle(fontSize: 14, color: color)),
+      ],
+    );
+  }
+
+  void _closeViolation(BuildContext context, ViolationModel violation) async {
+    final domain = _currentDomain;
+    if (domain == null) return;
+
+    // Проверяем достаточно ли влияния у домена
+    if (domain.influenceLevel < violation.costToClose) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Влияния не достаточно для закрытия этого нарушения'),
+          backgroundColor: Colors.red[800],
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Закрываем нарушение
+      final repository = context.read<MasqueradeBloc>().repository;
+      await repository.closeViolation(violation.id, domain.ownerId);
+
+      // Обновляем влияние домена
+      final newInfluence = domain.influenceLevel - violation.costToClose;
+      await repository.updateDomainInfluenceLevel(domain.id, newInfluence);
+
+      // Обновляем состояние
+      context.read<DomainBloc>().add(UpdateDomainInfluence(domain.id, newInfluence));
+
+      // Обновляем список нарушений
+      context.read<MasqueradeBloc>().add(LoadViolationsForDomain(domain.id));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Вы закрыли нарушение Маскарада'),
+          backgroundColor: Colors.green[800],
+          duration: const Duration(seconds: 3),
+        ),
+      );
+
+      // Обновляем данные
+      await _refreshDomainData();
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Ошибка: ${e.toString()}'),
+          backgroundColor: Colors.red[800],
+        ),
+      );
+    }
+  }
+
+  void _revealViolator(BuildContext context, ViolationModel violation) async {
+    final domain = _currentDomain;
+    if (domain == null) return;
+
+    // Проверяем достаточно ли влияния у ДОМЕНА
+    if (domain.influenceLevel < violation.costToReveal) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Влияния домена недостаточно, чтобы узнать, кто это был'),
+          backgroundColor: Colors.red[800],
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Раскрываем нарушителя
+      final repository = context.read<MasqueradeBloc>().repository;
+
+      // Получаем профиль нарушителя
+      final violatorProfile = await repository.getProfileById(violation.violatorId);
+      if (violatorProfile == null) {
+        throw Exception('Профиль нарушителя не найден');
+      }
+
+      // Обновляем влияние ДОМЕНА
+      final newInfluence = domain.influenceLevel - violation.costToReveal;
+      await repository.updateDomainInfluenceLevel(domain.id, newInfluence);
+
+      // Раскрываем нарушителя
+      await repository.revealViolation(
+        id: violation.id,
+        violatorName: violatorProfile.characterName,
+        revealedAt: DateTime.now().toIso8601String(),
+      );
+
+      // Обновляем состояние домена
+      context.read<DomainBloc>().add(UpdateDomainInfluence(domain.id, newInfluence));
+
+      // Обновляем список нарушений
+      context.read<MasqueradeBloc>().add(LoadViolationsForDomain(domain.id));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Это нарушение маскарада совершил ${violatorProfile.characterName}'),
+          backgroundColor: Colors.green[800],
+          duration: const Duration(seconds: 5),
+        ),
+      );
+
+      // Обновляем данные
+      await _refreshDomainData();
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Ошибка: ${e.toString()}'),
+          backgroundColor: Colors.red[800],
+        ),
+      );
+    }
+  }
+
+  Widget _buildViolationsSection() {
+    return _buildSection(
+      title: 'АКТИВНЫЕ НАРУШЕНИЯ МАСКАРАДА',
+      icon: Icons.warning_amber,
+      child: BlocBuilder<MasqueradeBloc, MasqueradeState>(
+        builder: (context, state) {
+          if (state is ViolationsLoading) {
+            return const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFd4af37)),
               ),
             );
           }
 
-          return Column(
-            children: violations.map((v) => _buildViolationCard(v)).toList(),
-          );
-        }
+          if (state is ViolationsLoaded) {
+            final violations = state.violations
+                .where((v) => v.domainId == _currentDomain!.id)
+                .toList();
 
-        return const SizedBox();
-      },
-    ),
-  );
-}
+            if (violations.isEmpty) {
+              return Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1a0000),
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(color: const Color(0xFFd4af37).withOpacity(0.3)),
+                ),
+                child: Column(
+                  children: [
+                    Icon(Icons.verified_user, size: 60, color: const Color(0xFFd4af37).withOpacity(0.7)),
+                    const SizedBox(height: 15),
+                    const Text(
+                      'Нарушений не обнаружено',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white70,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'На территории вашего домена всё спокойно',
+                      style: TextStyle(color: Colors.grey[400]),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return Column(
+              children: violations.map((v) => _buildViolationCard(v)).toList(),
+            );
+          }
+
+          return const SizedBox();
+        },
+      ),
+    );
+  }
 
   String _formatDateTime(DateTime date) {
-  return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year} '
-      '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-}
+    return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year} '
+        '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  }
 
 }

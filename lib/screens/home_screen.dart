@@ -44,6 +44,7 @@ class HomeScreen extends StatelessWidget {
             body: Center(child: CircularProgressIndicator()),
           );
         }
+        final profile = state.profile;
 
         return BlocListener<AuthBloc, AuthState>(
           listener: (context, authState) {
@@ -88,6 +89,7 @@ class _HomeScreenContentState extends State<_HomeScreenContent> with TickerProvi
   Timer? _cooldownTimer;
 
   DomainModel? _currentDomain;
+  bool _neutralizationHandled = false;
 
   // Храним текущий поворот карты в градусах (положительный = ? зависит от версии flutter_map)
   double _mapRotationDegrees = 0.0;
@@ -161,7 +163,6 @@ class _HomeScreenContentState extends State<_HomeScreenContent> with TickerProvi
         _error = e.toString();
         _isLoading = false;
       });
-      sendDebugToTelegram('❌ Ошибка загрузки данных: $e');
     }
   }
 
@@ -324,7 +325,7 @@ class _HomeScreenContentState extends State<_HomeScreenContent> with TickerProvi
       '• Координаты: ${_position?.latitude.toStringAsFixed(4)}, ${_position?.longitude.toStringAsFixed(4)}\n\n'
       '‼️ НЕМЕДЛЕННО СВЯЖИТЕСЬ С ИГРОКОМ ДЛЯ ПРОВЕДЕНИЯ СЦЕНКИ ЗАХВАТА! ‼️';
 
-      sendDebugToTelegram(message);
+      sendTelegramMode(chatId: '369397714', message: message, mode: 'debug');
     }
   }
 
@@ -347,8 +348,6 @@ class _HomeScreenContentState extends State<_HomeScreenContent> with TickerProvi
         _position = pos;
         _mapController.move(LatLng(pos.latitude, pos.longitude), 15);
       });
-    } catch (e) {
-      sendDebugToTelegram("Ошибка получения местоположения: $e");
     } finally {
       setState(() => _isLoadingLocation = false);
     }
@@ -424,13 +423,9 @@ class _HomeScreenContentState extends State<_HomeScreenContent> with TickerProvi
 
   DomainModel? _findDomainAtPosition(List<DomainModel> domains) {
     if (_position == null) return null;
-
-    sendDebugToTelegram('🔍 Поиск домена для координат: ${_position!.latitude}, ${_position!.longitude}');
-
     // Сначала ищем в не-нейтральных доменах
     for (final domain in domains) {
       if (!domain.isNeutral && domain.isPointInside(_position!.latitude, _position!.longitude)) {
-        sendDebugToTelegram('✅ Найден не-нейтральный домен: ${domain.name} (ID: ${domain.id})');
         return domain;
       }
     }
@@ -438,15 +433,13 @@ class _HomeScreenContentState extends State<_HomeScreenContent> with TickerProvi
     // Если не найден в обычных доменах, ищем нейтральный
     for (final domain in domains) {
       if (domain.isNeutral && domain.isPointInside(_position!.latitude, _position!.longitude)) {
-        sendDebugToTelegram('🌐 Найден нейтральный домен: ${domain.name} (ID: ${domain.id})');
         return domain;
       }
     }
 
     // Если ничего не найдено, возвращаем нейтральную территорию
-    sendDebugToTelegram('⚠️ Домен не найден, возвращаем нейтральную территорию');
     return DomainModel(
-      id: 4,
+      id: 0,
       name: 'Нейтральная зона',
       latitude: _position!.latitude,
       longitude: _position!.longitude,
@@ -673,171 +666,183 @@ class _HomeScreenContentState extends State<_HomeScreenContent> with TickerProvi
           );
         }
       },
-      child: BlocProvider.value(
-        value: context.read<MasqueradeBloc>(),
-        child: BlocBuilder<ProfileBloc, ProfileState>(
-          builder: (context, profileState) {
-            if (profileState is! ProfileLoaded) {
-              return const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
-              );
+      child: BlocListener<DomainBloc, DomainState>(
+        listener: (context, state) {
+          if (state is DomainsLoaded && !_neutralizationHandled) {
+            final profileState = context.read<ProfileBloc>().state;
+            if (profileState is ProfileLoaded) {
+              final neutralizedDomains = state.domains.where((d) => d.isNeutral && d.ownerId == profileState.profile.id).toList();
+              
+              if (neutralizedDomains.isNotEmpty) {
+                final remainingDomains = state.domains.where((d) => d.ownerId == profileState.profile.id && !d.isNeutral).toList();
+                
+                if (remainingDomains.isNotEmpty) {
+                  _neutralizationHandled = true;
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(builder: (_) => const DomainsScreen()),
+                  );
+                }
+              }
             }
+          }
+        },
+        child: BlocProvider.value(
+          value: context.read<MasqueradeBloc>(),
+          child: BlocBuilder<ProfileBloc, ProfileState>(
+            builder: (context, profileState) {
+              if (profileState is! ProfileLoaded) {
+                return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                );
+              }
 
-            final profile = profileState.profile;
+              final profile = profileState.profile;
 
-            // Проверяем, есть ли у пользователя домены
-            final hasDomains = _domains != null &&
-                _domains!.any((domain) => domain.ownerId == profile.id);
+              // Проверяем, есть ли у пользователя домены
+              final hasDomains = _domains != null &&
+                  _domains!.any((domain) => domain.ownerId == profile.id);
 
-            return Scaffold(
-              appBar: AppBar(
-                title: const Text(
-                  'Танкоград',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 24,
-                    color: Colors.white,
-                    fontFamily: 'Gothic',
-                    shadows: [
-                      Shadow(
-                        blurRadius: 4.0,
-                        color: Colors.black,
-                        offset: Offset(2.0, 2.0),
+              return Scaffold(
+                appBar: AppBar(
+                  title: const Text(
+                    'Танкоград',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 24,
+                      color: Colors.white,
+                      fontFamily: 'Gothic',
+                      shadows: [
+                        Shadow(
+                          blurRadius: 4.0,
+                          color: Colors.black,
+                          offset: Offset(2.0, 2.0),
+                        ),
+                      ],
+                    ),
+                  ),
+                  centerTitle: true,
+                  backgroundColor: const Color(0xFF4A0000),
+                  elevation: 0,
+                  flexibleSpace: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFF4A0000), Color(0xFF2A0000)],
                       ),
-                    ],
-                  ),
-                ),
-                centerTitle: true,
-                backgroundColor: const Color(0xFF4A0000),
-                elevation: 0,
-                flexibleSpace: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xFF4A0000), Color(0xFF2A0000)],
                     ),
                   ),
-                ),
-                // leading теперь открывает встроенный просмотр документа (в PWA — overlay)
-                leading: IconButton(
-                  icon: const Icon(Icons.menu_book, color: Colors.amber),
-                  tooltip: 'Открыть документ',
-                  onPressed: () {
-                    _openDocumentOverlay();
-                  },
-                ),
+                  // leading теперь открывает встроенный просмотр документа (в PWA — overlay)
+                  leading: IconButton(
+                    icon: const Icon(Icons.menu_book, color: Colors.amber),
+                    tooltip: 'Открыть документ',
+                    onPressed: () {
+                      _openDocumentOverlay();
+                    },
+                  ),
 
-                // кнопки справа: сначала (условно) чат, затем профиль
-                actions: [
-                  if (profile.clan == 'Малкавиан' || profile.isAdmin || profile.isStoryteller)
+                  // кнопки справа: сначала (условно) чат, затем профиль
+                  actions: [
+                    if (profile.clan == 'Малкавиан' || profile.isAdmin || profile.isStoryteller)
+                      IconButton(
+                        icon: const Icon(Icons.chat, color: Colors.amber),
+                        onPressed: _openCarpetChat,
+                        tooltip: 'Гобелен',
+                      ),
                     IconButton(
-                      icon: const Icon(Icons.chat, color: Colors.amber),
-                      onPressed: _openCarpetChat,
-                      tooltip: 'Гобелен',
+                      icon: const Icon(Icons.account_circle, color: Colors.amber),
+                      onPressed: _openProfileScreen,
+                      tooltip: 'Профиль',
                     ),
-                  IconButton(
-                    icon: const Icon(Icons.account_circle, color: Colors.amber),
-                    onPressed: _openProfileScreen,
-                    tooltip: 'Профиль',
-                  ),
-                ],
-              ),
-              body: BlocListener<MasqueradeBloc, MasqueradeState>(
-                listener: (context, state) {
-                  if (state is HuntCompleted) {
-                    if (state.violationOccurred) {
+                  ],
+                ),
+                body: BlocListener<MasqueradeBloc, MasqueradeState>(
+                  listener: (context, state) {
+                    if (state is HuntCompleted) {
+                      context.read<ProfileBloc>().add(UpdateHunger(state.newHunger));
+                      if (state.violationOccurred) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Охота успешна! Но создано нарушение маскарада ',
+                            ),
+                            backgroundColor: Colors.amber[800],
+                            duration: const Duration(seconds: 3),
+                          ),
+                        );
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Охота прошла успешно! Голод уменьшен до ${state.newHunger}'),
+                            backgroundColor: const Color(0xFF006400),
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    }
+
+                    // Обработка ошибки нулевого голода при охоте
+                    if (state is ViolationsError && state.message == 'hunt_with_zero_hunger') {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text(
-                            'Охота успешна! Но создано нарушение маскарада ',
-                          ),
-                          backgroundColor: Colors.amber[800],
+                          content: const Text('Ваш голод уже утолён, охотиться незачем'),
+                          backgroundColor: Colors.blue[800],
                           duration: const Duration(seconds: 3),
                         ),
                       );
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Охота прошла успешно! Голод уменьшен до ${state.newHunger}'),
-                          backgroundColor: const Color(0xFF006400),
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
                     }
-                  }
 
-                  // Обработка ошибки нулевого голода при охоте
-                  if (state is ViolationsError && state.message == 'hunt_with_zero_hunger') {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: const Text('Ваш голод уже утолён, охотиться незачем'),
-                        backgroundColor: Colors.blue[800],
-                        duration: const Duration(seconds: 3),
-                      ),
-                    );
-                  }
-
-                  // Обработка ошибки превышения голода
-                  if (state is ViolationsError && state.message == 'max_hunger_exceeded') {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: const Text('Невозможно создать нарушение: максимальный голод (5) будет превышен'),
-                        backgroundColor: Colors.red[800],
-                        duration: const Duration(seconds: 3),
-                      ),
-                    );
-                  }
-                },
-                child: Stack(
-                  children: [
-                    // Сам виджет карты (без глобального Transform.rotate)
-                    FlutterMap(
-                      mapController: _mapController,
-                      options: MapOptions(
-                        initialCenter: _position != null
-                            ? LatLng(_position!.latitude, _position!.longitude)
-                            : const LatLng(55.751244, 37.618423),
-                        initialZoom: 13,
-                        interactionOptions: const InteractionOptions(
-                          flags: ~InteractiveFlag.doubleTapDragZoom,
-                        ),
-                      ),
-                      children: [
-                        TileLayer(
-                          urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.masquerade.app',
-                        ),
-                        if (_position != null)
-                          MarkerLayer(
-                            markers: [
-                              Marker(
-                                point: LatLng(
-                                  _position!.latitude,
-                                  _position!.longitude,
-                                ),
-                                width: 48,
-                                height: 48,
-                                child: Builder(builder: (context) {
-                                  // Рассчитываем угол маркера так, чтобы он корректно показывал направление
-                                  // относительного текущего поворота карты.
-                                  final double compassDeg = _compassHeading ?? (_deviceOrientation * 180 / pi);
-                                  final double markerAngleDeg = compassDeg + _mapRotationDegrees;
-                                  final double markerAngleRad = (markerAngleDeg) * pi / 180;
-
-                                  return Transform.rotate(
-                                    angle: markerAngleRad,
-                                    child: const Icon(
-                                      Icons.navigation,
-                                      color: Color(0xFFD4AF37),
-                                      size: 48,
-                                    ),
-                                  );
-                                }),
-                              ),
-                            ],
+                    
+                  },
+                  child: Stack(
+                    children: [
+                      // Сам виджет карты (без глобального Transform.rotate)
+                      FlutterMap(
+                        mapController: _mapController,
+                        options: MapOptions(
+                          initialCenter: _position != null
+                              ? LatLng(_position!.latitude, _position!.longitude)
+                              : const LatLng(55.751244, 37.618423),
+                          initialZoom: 13,
+                          interactionOptions: const InteractionOptions(
+                            flags: ~InteractiveFlag.doubleTapDragZoom,
                           ),
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate:
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            userAgentPackageName: 'com.masquerade.app',
+                          ),
+                          if (_position != null)
+                            MarkerLayer(
+                              markers: [
+                                Marker(
+                                  point: LatLng(
+                                    _position!.latitude,
+                                    _position!.longitude,
+                                  ),
+                                  width: 48,
+                                  height: 48,
+                                  child: Builder(builder: (context) {
+                                    // Рассчитываем угол маркера так, чтобы он корректно показывал направление
+                                    // относительного текущего поворота карты.
+                                    final double compassDeg = _compassHeading ?? (_deviceOrientation * 180 / pi);
+                                    final double markerAngleDeg = compassDeg + _mapRotationDegrees;
+                                    final double markerAngleRad = (markerAngleDeg) * pi / 180;
+
+                                    return Transform.rotate(
+                                      angle: markerAngleRad,
+                                      child: const Icon(
+                                        Icons.navigation,
+                                        color: Color(0xFFD4AF37),
+                                        size: 48,
+                                      ),
+                                    );
+                                  }),
+                                ),
+                              ],
+                            ),
                       ],
                     ),
 
@@ -894,13 +899,11 @@ class _HomeScreenContentState extends State<_HomeScreenContent> with TickerProvi
                                 _mapController.rotate(rotateToDeg);
                               } catch (e) {
                                 // Если метода rotate нет или он бросил — логируем и продолжаем
-                                sendDebugToTelegram('Ошибка при попытке поворота карты: $e');
                               }
 
                               // Центрируем карту в любом случае
                               _mapController.move(LatLng(_position!.latitude, _position!.longitude), 15);
                             } catch (e) {
-                              sendDebugToTelegram('Ошибка при центрировании/повороте: $e');
                             }
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -948,7 +951,7 @@ class _HomeScreenContentState extends State<_HomeScreenContent> with TickerProvi
                       if (hasDomains) // Кнопка "Домен" появляется только если у пользователя есть домены
                         _buildActionButton(
                           icon: Icons.location_city,
-                          label: _isDomainCooldown() ? 'Ждите...' : 'Домен',
+                          label: _isDomainCooldown() ? 'Ждите...' : 'Домены',
                           color: _isDomainCooldown() ? Colors.grey : const Color(0xFF2A0000),
                           onPressed: _isDomainCooldown() ? null : _onDomainWithCooldown,
                         ),
@@ -960,7 +963,7 @@ class _HomeScreenContentState extends State<_HomeScreenContent> with TickerProvi
           },
         ),
       ),
-    );
+    ));
   }
 
   // Виджет статус-бара персонажа

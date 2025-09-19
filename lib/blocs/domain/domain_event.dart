@@ -172,3 +172,5 @@ class DomainsUpdated extends DomainEvent {
   @override
   List<Object?> get props => [domains];
 }
+
+class ResetNeutralizedDomains extends DomainEvent {}

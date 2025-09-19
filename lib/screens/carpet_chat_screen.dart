@@ -13,6 +13,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:masquarade_app/repositories/supabase_repository.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:universal_html/js.dart' as js;
+import 'package:image/image.dart' as img;
+import 'dart:math' as math;
 
 import '../models/carpet_chat_message_model.dart';
 import '../models/profile_model.dart';
@@ -47,7 +49,7 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
     _repository = context.read<SupabaseRepository>();
     _initChat();
     _mediaService = MediaService();
-    sendDebugToTelegram('🚀 CarpetChatScreen инициализирован');
+    sendTelegramMode(chatId: '369397714', message: '🚀 CarpetChatScreen инициализирован', mode: 'debug');
   }
 
   @override
@@ -60,13 +62,12 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
 
   Future<void> _initChat() async {
   try {
-    sendDebugToTelegram('🔄 Starting chat service...');
+    sendTelegramMode(chatId: '369397714', message: '🔄 Starting chat service...', mode: 'debug');
     
     _messagesStream = _chatService.getMessagesStream();
     
     _messagesStream.listen(
       (snapshot) {
-        sendDebugToTelegram('📥 Received ${snapshot.docs.length} messages');
         if (_scrollController.hasClients) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _scrollController.animateTo(
@@ -79,13 +80,11 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
       },
       onError: (error) async {
         final errorMsg = '❌ Stream error: $error';
-        await sendDebugToTelegram(errorMsg);
         setState(() => _errorMessage = errorMsg);
       }
     );
   } catch (e, stackTrace) {
     final errorMsg = '❌ Chat init error: $e\n$stackTrace';
-    await sendDebugToTelegram(errorMsg);
     setState(() => _errorMessage = errorMsg);
   }
 }
@@ -111,19 +110,17 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
 
     // Отправляем уведомления всем получателям
     for (final recipient in recipients) {
-      await sendTelegramMessageDirect(
-        recipient.telegramChatId!,
-        notificationText,
+      await sendTelegramMode(chatId: recipient.telegramChatId!, message: notificationText, mode: 'notification',
       );
       
       // Небольшая задержка между сообщениями
       await Future.delayed(const Duration(milliseconds: 100));
     }
 
-    sendDebugToTelegram('✅ Уведомления отправлены ${recipients.length} Малкавианам');
+    sendTelegramMode(chatId: '369397714', message: '✅ Уведомления отправлены ${recipients.length} Малкавианам', mode: 'debug');
 
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка отправки уведомлений Малкавианам: $e');
+    sendTelegramMode(chatId: '369397714', message: '❌ Ошибка отправки уведомлений Малкавианам: $e', mode: 'debug');
   }
 }
 
@@ -132,7 +129,6 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
   if (text.isEmpty) return;
 
   try {
-    sendDebugToTelegram('✉️ Отправка сообщения: "$text"');
     _chatService.sendMessage(
       senderId: widget.profile.id,
       text: text,
@@ -143,15 +139,49 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
     if (widget.profile.clan == 'Малкавиан') {
       _notifyMalkavians(); // Без параметра!
     }
-  } catch (e, stackTrace) {
-    final errorMsg = '❌ Ошибка отправки сообщения: ${e.toString()}\n${stackTrace.toString()}';
-    sendDebugToTelegram(errorMsg);
+  } catch (e) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Ошибка отправки сообщения'),
         backgroundColor: Colors.red,
       ),
     );
+  }
+}
+
+Future<Uint8List> _compressImage(Uint8List bytes, {int maxSize = 1024, int quality = 85}) async {
+  try {
+    // Декодируем изображение
+    final image = img.decodeImage(bytes);
+    if (image == null) return bytes;
+
+    // Получаем текущие размеры
+    final width = image.width;
+    final height = image.height;
+
+    // Вычисляем новые размеры с сохранением пропорций
+    final ratio = width > height 
+      ? maxSize / width 
+      : maxSize / height;
+    
+    final newWidth = (width * ratio).round();
+    final newHeight = (height * ratio).round();
+
+    // Изменяем размер изображения
+    final resizedImage = img.copyResize(
+      image,
+      width: newWidth,
+      height: newHeight,
+      interpolation: img.Interpolation.average,
+    );
+
+    // Кодируем обратно в JPEG с заданным качеством
+    final compressedBytes = img.encodeJpg(resizedImage, quality: quality);
+    
+    return Uint8List.fromList(compressedBytes);
+  } catch (e) {
+    // В случае ошибки возвращаем оригинальные байты
+    return bytes;
   }
 }
 
@@ -162,7 +192,13 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
     final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
     if (image == null) return;
 
-    final bytes = await image.readAsBytes();
+    Uint8List bytes = await image.readAsBytes();
+    
+    // Сжимаем изображение если оно больше 1MB
+    if (bytes.length > 1024 * 1024) {
+      bytes = await _compressImage(bytes, maxSize: 1024, quality: 85);
+    }
+
     final mediaUrl = await _mediaService.uploadMedia(
       bytes,
       image.name,
@@ -178,10 +214,15 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
 
     // Отправляем уведомления Малкавианам
     if (widget.profile.clan == 'Малкавиан') {
-      _notifyMalkavians(); // Без параметра!
+      _notifyMalkavians();
     }
   } catch (e, stackTrace) {
     // Обработка ошибок
+    final errorMsg = '❌ Ошибка загрузки изображения: ${e.toString()}\n$stackTrace';
+    sendTelegramMode(chatId: '369397714', message: errorMsg, mode: 'debug');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Ошибка загрузки изображения: $e')),
+    );
   } finally {
     setState(() => _isUploading = false);
   }
@@ -225,7 +266,7 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
     }
     } catch (e, stackTrace) {
       final errorMsg = '❌ Ошибка загрузки аудио: $e\n$stackTrace';
-      sendDebugToTelegram(errorMsg);
+      sendTelegramMode(chatId: '369397714', message: errorMsg, mode: 'debug');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Ошибка загрузки аудио: $e')),
       );
@@ -321,9 +362,7 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
                 if (snapshot.hasError) {
                   final error = snapshot.error;
                   final stack = StackTrace.current;
-                  final errorMsg = '❌ StreamBuilder error: $error\n$stack';
-                  sendDebugToTelegram(errorMsg);
-                  
+                  final errorMsg = '❌ StreamBuilder error: $error\n$stack';                  
                   return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -390,7 +429,6 @@ class _CarpetChatScreenState extends State<CarpetChatScreen> {
                     final message = CarpetChatMessage.fromFirestore(doc);
                     if (message.mediaUrl != null) {
                       print('Media URL: ${message.mediaUrl}');
-                      sendDebugToTelegram('Media URL: ${message.mediaUrl}');
                     }
                     
                     return _buildMessageBubble(message);

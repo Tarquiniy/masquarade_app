@@ -152,9 +152,10 @@ class ViolationModel {
   bool get isClosed => status == ViolationStatus.closed;
   bool get isRevealed => status == ViolationStatus.revealed;
   bool get canBeRevealed {
-  // Раскрыть можно только открытые нарушения в течение 24 часов
+  // Раскрыть можно открытые и закрытые нарушения в течение 3 часов
   final now = DateTime.now();
-  return status == ViolationStatus.open && now.difference(createdAt).inHours <= 24;
+  return (status == ViolationStatus.open || status == ViolationStatus.closed) && 
+         now.difference(createdAt).inHours <= 3;
 }
 
   // Добавляем новый геттер для проверки возможности закрытия

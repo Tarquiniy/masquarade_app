@@ -12,6 +12,7 @@ import 'package:masquarade_app/blocs/profile/profile_bloc.dart';
 import 'package:masquarade_app/models/domain_model.dart';
 import 'package:masquarade_app/models/profile_model.dart';
 import 'package:masquarade_app/screens/domain_screen.dart';
+import 'package:masquarade_app/screens/home_screen.dart';
 import 'package:masquarade_app/utils/debug_telegram.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -67,15 +68,13 @@ class _DomainsScreenState extends State<DomainsScreen> {
       setState(() {
         _currentPosition = position;
       });
-      
+
       if (_isMapReady) {
         _mapController.move(
           LatLng(position.latitude, position.longitude),
           15,
         );
       }
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка центрирования: $e');
     } finally {
       setState(() => _isLoadingLocation = false);
     }
@@ -93,7 +92,7 @@ class _DomainsScreenState extends State<DomainsScreen> {
       await Future.delayed(const Duration(milliseconds: 100));
       return _centerOnLocation();
     }
-    
+
     setState(() => _isLoadingLocation = true);
     try {
       final position = await Geolocator.getCurrentPosition(
@@ -103,8 +102,6 @@ class _DomainsScreenState extends State<DomainsScreen> {
         LatLng(position.latitude, position.longitude),
         15,
       );
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка центрирования: $e');
     } finally {
       setState(() => _isLoadingLocation = false);
     }
@@ -115,8 +112,8 @@ class _DomainsScreenState extends State<DomainsScreen> {
     if (profileState is ProfileLoaded) {
       final profile = profileState.profile;
       _userDomains = allDomains
-          .where((domain) => domain.ownerId == profile.id && 
-                             !domain.isNeutral && 
+          .where((domain) => domain.ownerId == profile.id &&
+                             !domain.isNeutral &&
                              domain.securityLevel > 0)
           .toList();
     }
@@ -149,6 +146,26 @@ class _DomainsScreenState extends State<DomainsScreen> {
         if (state is DomainsLoaded) {
           _updateUserDomains(state.domains);
           _checkIfShouldCloseScreen(_userDomains);
+          
+          // NEW: Check for neutralized domains and navigate if needed
+          final neutralizedDomains = state.domains.where((d) => d.isNeutral).toList();
+          final userNeutralizedDomains = neutralizedDomains.where((d) => d.ownerId == profile.id).toList();
+          
+          if (userNeutralizedDomains.isNotEmpty) {
+            final remainingDomains = state.domains
+                .where((d) => d.ownerId == profile.id && !d.isNeutral)
+                .toList();
+                
+            if (remainingDomains.isEmpty) {
+              // No domains left, go to home screen
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const HomeScreen()),
+              );
+            } else {
+              // Still have domains, stay on domains screen
+              context.read<DomainBloc>().add(LoadDomains());
+            }
+          }
         }
       },
       child: Scaffold(
@@ -193,7 +210,7 @@ class _DomainsScreenState extends State<DomainsScreen> {
 
             if (domainState is DomainsLoaded) {
               final domains = domainState.domains;
-              
+
               _updateUserDomains(domains);
 
               if (_userDomains.isEmpty) {

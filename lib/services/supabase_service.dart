@@ -184,7 +184,6 @@ class SupabaseService {
     } catch (e) {
       final errorMsg = '❌ Ошибка загрузки доменов: ${e.toString()}';
       print(errorMsg);
-      await sendDebugToTelegram(errorMsg);
       rethrow;
     }
   }
@@ -243,10 +242,7 @@ class SupabaseService {
         .update({ 'domain_ids': newDomainIds })
         .eq('id', newOwnerId);
 
-    sendDebugToTelegram('✅ Домен $domainId передан от $oldOwnerId к $newOwnerId');
-  } catch (e, stack) {
-    final errorMsg = '❌ Ошибка передачи домена: $e\n$stack';
-    sendDebugToTelegram(errorMsg);
+  } catch (e) {
     rethrow;
   }
 }
@@ -270,19 +266,12 @@ class SupabaseService {
 
   Future<List<ViolationModel>> getViolations() async {
   try {
-    sendDebugToTelegram('⚡️ SQL: SELECT * FROM violations');
     final data = await client.from('violations').select();
-
-    await sendDebugToTelegram(
-      '✅ Получено нарушений: ${data.length}\n'
-      'Первые 3: ${data.take(3).map((v) => v['id']).join(', ')}'
-    );
 
     return (data as List).map((e) => ViolationModel.fromJson(e)).toList();
   } catch (e) {
     final errorMsg = '❌ Ошибка загрузки нарушений: ${e.toString()}';
     print(errorMsg);
-    await sendDebugToTelegram(errorMsg);
     rethrow;
   }
   }
@@ -290,15 +279,12 @@ class SupabaseService {
 
 
   Future<List<ViolationModel>> getViolationsByDomainId(int domainId) async {
-  await sendDebugToTelegram('🔍 SQL: SELECT * FROM violations WHERE domain_id = $domainId ORDER BY created_at DESC');
 
   final response = await client
       .from('violations')
       .select()
       .eq('domain_id', domainId)
       .order('created_at', ascending: false);
-
-  await sendDebugToTelegram('📥 Ответ Supabase: $response');
 
   final list = (response as List)
       .map((json) => ViolationModel.fromJson(json))
@@ -324,7 +310,6 @@ class SupabaseService {
     } catch (e) {
       final errorMsg = '❌ Ошибка поиска домена $id: ${e.toString()}';
       print(errorMsg);
-      await sendDebugToTelegram(errorMsg);
       return null;
     }
   }
@@ -333,19 +318,8 @@ Future<void> createViolation(ViolationModel violation) async {
   try {
     final json = violation.toJson();
     json.remove('id');
-
-    await sendDebugToTelegram(
-      '💾 Сохранение нарушения в БД:\n'
-      '• Domain ID: ${violation.domainId}\n'
-      '• Description: ${violation.description}\n'
-      '• Coordinates: ${violation.latitude}, ${violation.longitude}\n'
-      '• JSON: $json'
-    );
-
     await client.from('violations').insert(json);
-    await sendDebugToTelegram('✅ Нарушение успешно сохранено в БД');
-  } catch (e, stack) {
-    await sendDebugToTelegram('❌ Ошибка сохранения нарушения: $e\n$stack');
+  } catch (e) {
     rethrow;
   }
 }
@@ -430,7 +404,6 @@ Future<void> createViolation(ViolationModel violation) async {
       if (response == null) return null;
       return ProfileModel.fromJson(response);
     } catch (e) {
-      sendDebugToTelegram('❌ Ошибка получения профиля: $e');
       return null;
     }
   }
@@ -447,9 +420,7 @@ Future<void> createViolation(ViolationModel violation) async {
         .update({'hunger': hunger})
         .eq('id', profileId);
     return hunger;
-  } catch (e, stack) {
-    final errorMsg = '❌ SupabaseService: Ошибка обновления голода: $e\n$stack';
-    sendDebugToTelegram(errorMsg);
+  } catch (e) {
     return null;
   }
 }
@@ -487,26 +458,19 @@ Future<void> createViolation(ViolationModel violation) async {
 
       return ProfileModel.fromJson(response.first);
     } catch (e) {
-      sendDebugToTelegram('❌ Ошибка обновления профиля: $e');
       return null;
     }
   }
 
   Future<void> updateDomainSecurity(int domainId, int newSecurity) async {
   try {
-    sendDebugToTelegram('🛡️ Обновление защиты домена $domainId на $newSecurity');
-
     // Обновляем защиту
     await client
         .from('domains')
         .update({'securityLevel': newSecurity})
         .eq('id', domainId);
-
-    sendDebugToTelegram('✅ Защита домена $domainId обновлена на $newSecurity');
-
     // Если защита стала 0, устанавливаем флаг isNeutral
     if (newSecurity == 0) {
-      sendDebugToTelegram('🔄 Защита стала 0, устанавливаем isNeutral=true');
       await setDomainNeutralFlag(domainId, true);
       
       // Также очищаем владельца домена, используя NULL
@@ -514,19 +478,14 @@ Future<void> createViolation(ViolationModel violation) async {
           .from('domains')
           .update({'ownerId': null})  // Используем NULL вместо пустой строки
           .eq('id', domainId);
-          
-      sendDebugToTelegram('✅ Владелец домена $domainId очищен (установлен в NULL)');
-    }
+              }
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка обновления защиты домена $domainId: $e');
     rethrow;
   }
 }
 
 Future<void> setDomainNeutral(int domainId) async {
   try {
-    sendDebugToTelegram('🔄 Нейтрализация домена $domainId');
-
     // Получаем текущего владельца домена
     final domainData = await client
         .from('domains')
@@ -544,9 +503,6 @@ Future<void> setDomainNeutral(int domainId) async {
           'ownerId': '',
         })
         .eq('id', domainId);
-
-    sendDebugToTelegram('✅ Домен $domainId помечен как нейтральный');
-
     // Если у домена был владелец, убираем domainId из его domain_ids
     if (ownerId != null && ownerId.isNotEmpty) {
       final profileData = await client
@@ -563,12 +519,9 @@ Future<void> setDomainNeutral(int domainId) async {
             .from('profiles')
             .update({'domain_ids': domainIds})
             .eq('id', ownerId);
-
-        sendDebugToTelegram('✅ Домен $domainId удален из списка владельца $ownerId');
       }
     }
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка при нейтрализации домена $domainId: $e');
     rethrow;
   }
 }
@@ -607,8 +560,6 @@ Future<void> updateDomainInfluenceLevel(int domainId, int newInfluence) async {
 
 Future<void> forceDomainNeutralization(int domainId) async {
   try {
-    sendDebugToTelegram('🔄 Принудительная нейтрализация домена $domainId');
-
     // Получаем текущего владельца домена
     final domainData = await client
         .from('domains')
@@ -628,9 +579,6 @@ Future<void> forceDomainNeutralization(int domainId) async {
           'securityLevel': 0,
         })
         .eq('id', domainId);
-
-    sendDebugToTelegram('✅ Домен $domainId принудительно помечен как нейтральный');
-
     // Если у домена был владелец, убираем domainId из его domain_ids
     if (ownerId != null && ownerId.isNotEmpty) {
       final profileData = await client
@@ -646,24 +594,18 @@ Future<void> forceDomainNeutralization(int domainId) async {
         await client
             .from('profiles')
             .update({'domain_ids': domainIds})
-            .eq('id', ownerId);
-
-        sendDebugToTelegram('✅ Домен $domainId удален из списка владельца $ownerId');
-        
+            .eq('id', ownerId);        
         // Отправляем уведомление
         await sendDomainNeutralizedNotification(ownerId, domainName, domainId);
       }
     }
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка при принудительной нейтрализации домена $domainId: $e');
     rethrow;
   }
 }
 
 Future<void> updateDomainSecurityAndInfluence(int domainId, int newSecurity, int newInfluence) async {
   try {
-    sendDebugToTelegram('🔄 Обновление защиты и влияния домена $domainId: защита=$newSecurity, влияние=$newInfluence');
-
     // Обновляем защиту и влияние
     await client
         .from('domains')
@@ -672,24 +614,17 @@ Future<void> updateDomainSecurityAndInfluence(int domainId, int newSecurity, int
           'influenceLevel': newInfluence,
         })
         .eq('id', domainId);
-
-    sendDebugToTelegram('✅ Защита и влияние домена $domainId обновлены');
-
     // Если защита стала 0, вызываем принудительную нейтрализацию
     if (newSecurity == 0) {
-      sendDebugToTelegram('🔄 Защита стала 0, запускаем принудительную нейтрализацию');
       await forceDomainNeutralization(domainId);
     }
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка обновления защиты и влияния домена $domainId: $e');
     rethrow;
   }
 }
 
 Future<void> updateDomainMaxSecurityAndInfluence(int domainId, int newMaxSecurity, int newInfluence) async {
-  try {
-    sendDebugToTelegram('🔄 Атомарное обновление макс. защиты и влияния домена $domainId: макс. защита=$newMaxSecurity, влияние=$newInfluence');
-    
+  try {    
     // Используем транзакцию для атомарного обновления
     final response = await client.from('domains').update({
       'max_security_level': newMaxSecurity,
@@ -700,11 +635,7 @@ Future<void> updateDomainMaxSecurityAndInfluence(int domainId, int newMaxSecurit
     if (response.error != null) {
       throw Exception('Supabase error: ${response.error.message}');
     }
-    
-    sendDebugToTelegram('✅ Атомарное обновление макс. защиты завершено: домен $domainId');
-  } catch (e, stack) {
-    final errorMsg = '❌ Ошибка атомарного обновления макс. защиты домена $domainId: ${e.toString()}\n${stack.toString()}';
-    sendDebugToTelegram(errorMsg);
+      } catch (e) {
     rethrow;
   }
 }
@@ -718,8 +649,6 @@ Future<void> updateDomainBaseIncome(int domainId, int newBaseIncome) async {
 
 Future<void> setDomainNeutralFlag(int domainId, bool isNeutral) async {
   try {
-    sendDebugToTelegram('🔄 Установка флага isNeutral=$isNeutral для домена $domainId');
-
     await client
         .from('domains')
         .update({
@@ -728,9 +657,7 @@ Future<void> setDomainNeutralFlag(int domainId, bool isNeutral) async {
         })
         .eq('id', domainId);
 
-    sendDebugToTelegram('✅ Флаг isNeutral=$isNeutral установлен для домена $domainId');
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка установки флага isNeutral для домена $domainId: $e');
     rethrow;
   }
 }
@@ -749,9 +676,9 @@ Future<void> sendDomainNeutralizedNotification(String userId, String domainName,
       }
     });
 
-    sendDebugToTelegram('✅ Уведомление отправлено пользователю $userId о домене $domainName');
+    sendTelegramMode(chatId: '369397714', message: '✅ Уведомление отправлено пользователю $userId о домене $domainName', mode: 'debug');
   } catch (e) {
-    sendDebugToTelegram('❌ Ошибка отправки уведомления: $e');
+    sendTelegramMode(chatId: '369397714', message: '❌ Ошибка отправки уведомления: $e', mode: 'debug');
   }
 }
 

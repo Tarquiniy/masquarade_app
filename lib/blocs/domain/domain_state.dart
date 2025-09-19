@@ -22,10 +22,12 @@ class DomainError extends DomainState {
 
 class DomainsLoaded extends DomainState {
   final List<DomainModel> domains;
-  const DomainsLoaded(this.domains);
+  final List<DomainModel> neutralizedDomains;
+
+  const DomainsLoaded(this.domains, [this.neutralizedDomains = const []]);
 
   @override
-  List<Object?> get props => [domains];
+  List<Object?> get props => [domains, neutralizedDomains];
 }
 
 class UserDomainLoaded extends DomainState {

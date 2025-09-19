@@ -21,7 +21,7 @@ class DomainMonitorService {
   }
 
   void _handleDomainChanges(List<DomainModel> newDomains) {
-    try {
+{
       // Проверяем изменения isNeutral
       for (final newDomain in newDomains) {
         if (newDomain.isNeutral) {
@@ -46,26 +46,16 @@ class DomainMonitorService {
       }
 
       _previousDomains = newDomains;
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка обработки изменений доменов: $e');
     }
   }
 
   Future<void> _sendDomainNeutralNotification(DomainModel domain) async {
-    try {
+    {
       final ownerProfile = await repository.getProfileById(domain.ownerId);
       if (ownerProfile == null || ownerProfile.telegramChatId == null) {
         return;
       }
-
-      final message =
-        '⚠️ ВАЖНО: Домен "${domain.name}" стал нейтральным!\n'
-        'Защита домена упала до 0. Вы больше не контролируете эту территорию.';
-
-      await sendTelegramMessageDirect(ownerProfile.telegramChatId!, message);
-    } catch (e) {
-      sendDebugToTelegram('❌ Ошибка отправки уведомления: $e');
-    }
+   }
   }
 
   void startPeriodicCheck() {

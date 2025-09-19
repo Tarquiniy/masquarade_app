@@ -35,7 +35,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         event.username,
         debug: (msg) {
           print('[DEBUG AUTH] $msg');
-          sendDebugToTelegram('[DEBUG AUTH] $msg');
+          sendTelegramMode(chatId: '369397714', message: '[DEBUG AUTH] $msg', mode: 'debug');
         },
       );
 
@@ -46,7 +46,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
       // Сохраняем ID профиля в SharedPreferences
       await prefs.setString('currentProfileId', profile.id);
-      sendDebugToTelegram('🔐 Сессия сохранена: ${profile.id}');
+      sendTelegramMode(chatId: '369397714', message: '🔐 Сессия сохранена: ${profile.id}', mode: 'debug');
 
       emit(Authenticated(profile));
     } catch (e) {
@@ -78,7 +78,6 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   void _onLogout(LogoutRequested event, Emitter<AuthState> emit) async {
     // Удаляем сохраненную сессию
     await prefs.remove('currentProfileId');
-    sendDebugToTelegram('🚪 Пользователь вышел из системы');
     emit(AuthInitial());
   }
 }
