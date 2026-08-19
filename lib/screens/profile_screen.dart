@@ -2,15 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:masquarade_app/blocs/auth/auth_bloc.dart';
+import 'package:tankograd/blocs/auth/auth_bloc.dart';
 
-import 'package:masquarade_app/blocs/profile/profile_bloc.dart';
-import 'package:masquarade_app/models/domain_model.dart';
-import 'package:masquarade_app/models/profile_model.dart';
-import 'package:masquarade_app/repositories/supabase_repository.dart';
-import 'package:masquarade_app/screens/coin_flip_screen.dart';
-import 'package:masquarade_app/utils/debug_telegram.dart';
-import 'package:masquarade_app/utils/clan_utils.dart';
+import 'package:tankograd/blocs/profile/profile_bloc.dart';
+import 'package:tankograd/models/domain_model.dart';
+import 'package:tankograd/models/profile_model.dart';
+import 'package:tankograd/repositories/supabase_repository.dart';
+import 'package:tankograd/screens/coin_flip_screen.dart';
+import 'package:tankograd/utils/debug_telegram.dart';
+import 'package:tankograd/utils/clan_utils.dart';
 
 class ProfileScreen extends StatefulWidget {
   final ProfileModel profile;

@@ -1,8 +1,8 @@
 import 'dart:async';
 
-import 'package:masquarade_app/models/domain_model.dart';
-import 'package:masquarade_app/repositories/supabase_repository.dart';
-import 'package:masquarade_app/utils/debug_telegram.dart';
+import 'package:tankograd/models/domain_model.dart';
+import 'package:tankograd/repositories/supabase_repository.dart';
+import 'package:tankograd/utils/debug_telegram.dart';
 
 class DomainMonitorService {
   final SupabaseRepository repository;

@@ -11,22 +11,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 import 'package:firebase_core/firebase_core.dart';
 
-import 'package:masquarade_app/blocs/domain/domain_event.dart';
-import 'package:masquarade_app/env.dart';
-import 'package:masquarade_app/models/domain_model.dart';
-import 'package:masquarade_app/models/profile_model.dart';
-import 'package:masquarade_app/models/violation_model.dart';
-import 'package:masquarade_app/services/domain_monitor_service.dart';
-import 'package:masquarade_app/blocs/auth/auth_bloc.dart';
-import 'package:masquarade_app/blocs/domain/domain_bloc.dart';
-import 'package:masquarade_app/blocs/masquerade/masquerade_bloc.dart';
-import 'package:masquarade_app/blocs/profile/profile_bloc.dart';
-import 'package:masquarade_app/repositories/supabase_repository.dart';
-import 'package:masquarade_app/services/supabase_service.dart';
+import 'package:tankograd/blocs/domain/domain_event.dart';
+import 'package:tankograd/env.dart';
+import 'package:tankograd/models/domain_model.dart';
+import 'package:tankograd/models/profile_model.dart';
+import 'package:tankograd/models/violation_model.dart';
+import 'package:tankograd/services/domain_monitor_service.dart';
+import 'package:tankograd/blocs/auth/auth_bloc.dart';
+import 'package:tankograd/blocs/domain/domain_bloc.dart';
+import 'package:tankograd/blocs/masquerade/masquerade_bloc.dart';
+import 'package:tankograd/blocs/profile/profile_bloc.dart';
+import 'package:tankograd/repositories/supabase_repository.dart';
+import 'package:tankograd/services/supabase_service.dart';
 
 // Импортим твою функцию отправки, но будем вызывать её только когда Supabase готов.
 // (Импорталиас, чтобы не путаться с именами в проекте)
-import 'package:masquarade_app/utils/debug_telegram.dart' as debug_tele;
+import 'package:tankograd/utils/debug_telegram.dart' as debug_tele;
 
 import 'screens/home_screen.dart';
 import 'screens/enter_username_screen.dart';
@@ -213,12 +213,12 @@ Future<void> main() async {
     try {
       await Firebase.initializeApp(
         options: const FirebaseOptions(
-          apiKey: "AIzaSyCpQyNCQYkSajBX5Wr8Ii9wlDP4nX6wchE",
-          authDomain: "tankograd.firebaseapp.com",
-          projectId: "tankograd",
-          storageBucket: "tankograd.firebasestorage.app",
-          messagingSenderId: "255328966030",
-          appId: "1:255328966030:web:dd88de76c1a68c6cdf80df",
+          apiKey: firebase_apiKey,
+          authDomain: firebase_authDomain,
+          projectId: firebase_projectId,
+          storageBucket: firebase_storageBucket,
+          messagingSenderId: firebase_messagingSenderId,
+          appId: firebase_appId,
         ),
       );
     } catch (e) {
@@ -353,7 +353,7 @@ class MyApp extends StatelessWidget {
           ),
         ],
         child: MaterialApp(
-          title: 'Masquerade App',
+          title: 'Танкоград',
           theme: ThemeData(
             colorScheme: ColorScheme.dark(
               primary: Color(0xFF8b0000),

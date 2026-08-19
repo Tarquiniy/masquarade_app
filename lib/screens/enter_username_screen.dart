@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:masquarade_app/blocs/auth/auth_bloc.dart';
+import 'package:tankograd/blocs/auth/auth_bloc.dart';
 
 class EnterUsernameScreen extends StatelessWidget {
   const EnterUsernameScreen({super.key});

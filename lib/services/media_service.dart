@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'package:masquarade_app/utils/debug_telegram.dart';
+import 'package:tankograd/utils/debug_telegram.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide Provider;
 import '../env.dart';
 

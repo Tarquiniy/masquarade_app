@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
-import 'package:masquarade_app/utils/debug_telegram.dart';
+import 'package:tankograd/utils/debug_telegram.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timezone/standalone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
