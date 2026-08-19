@@ -4,10 +4,10 @@ import 'dart:math';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:masquarade_app/blocs/domain/domain_bloc.dart';
-import 'package:masquarade_app/blocs/domain/domain_event.dart';
-import 'package:masquarade_app/blocs/profile/profile_bloc.dart';
-import 'package:masquarade_app/utils/debug_telegram.dart';
+import 'package:tankograd/blocs/domain/domain_bloc.dart';
+import 'package:tankograd/blocs/domain/domain_event.dart';
+import 'package:tankograd/blocs/profile/profile_bloc.dart';
+import 'package:tankograd/utils/debug_telegram.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 

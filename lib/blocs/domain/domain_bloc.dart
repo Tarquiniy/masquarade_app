@@ -3,9 +3,9 @@ import 'dart:convert';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:http/http.dart' as http;
-import 'package:masquarade_app/env.dart';
-import 'package:masquarade_app/models/domain_model.dart';
-import 'package:masquarade_app/utils/debug_telegram.dart';
+import 'package:tankograd/env.dart';
+import 'package:tankograd/models/domain_model.dart';
+import 'package:tankograd/utils/debug_telegram.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'domain_event.dart';
 import 'domain_state.dart';

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:masquarade_app/blocs/masquerade/masquerade_bloc.dart';
-import 'package:masquarade_app/models/violation_model.dart';
+import 'package:tankograd/blocs/masquerade/masquerade_bloc.dart';
+import 'package:tankograd/models/violation_model.dart';
 
 class ViolationsScreen extends StatelessWidget {
   const ViolationsScreen({super.key});

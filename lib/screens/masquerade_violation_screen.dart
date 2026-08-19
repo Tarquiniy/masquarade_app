@@ -2,13 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:masquarade_app/blocs/domain/domain_bloc.dart';
-import 'package:masquarade_app/blocs/domain/domain_event.dart';
-import 'package:masquarade_app/blocs/domain/domain_state.dart';
-import 'package:masquarade_app/blocs/masquerade/masquerade_bloc.dart';
-import 'package:masquarade_app/models/domain_model.dart';
-import 'package:masquarade_app/models/profile_model.dart';
-import 'package:masquarade_app/utils/debug_telegram.dart';
+import 'package:tankograd/blocs/domain/domain_bloc.dart';
+import 'package:tankograd/blocs/domain/domain_event.dart';
+import 'package:tankograd/blocs/domain/domain_state.dart';
+import 'package:tankograd/blocs/masquerade/masquerade_bloc.dart';
+import 'package:tankograd/models/domain_model.dart';
+import 'package:tankograd/models/profile_model.dart';
+import 'package:tankograd/utils/debug_telegram.dart';
 
 class MasqueradeViolationScreen extends StatefulWidget {
   final ProfileModel profile;

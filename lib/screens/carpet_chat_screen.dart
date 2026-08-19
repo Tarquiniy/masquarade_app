@@ -10,7 +10,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:masquarade_app/repositories/supabase_repository.dart';
+import 'package:tankograd/repositories/supabase_repository.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:universal_html/js.dart' as js;
 import 'package:image/image.dart' as img;

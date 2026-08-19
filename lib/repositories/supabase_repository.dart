@@ -1,8 +1,8 @@
 import 'dart:async';
 
-import 'package:masquarade_app/models/domain_model.dart';
-import 'package:masquarade_app/models/violation_model.dart';
-import 'package:masquarade_app/utils/debug_telegram.dart';
+import 'package:tankograd/models/domain_model.dart';
+import 'package:tankograd/models/violation_model.dart';
+import 'package:tankograd/utils/debug_telegram.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/profile_model.dart';

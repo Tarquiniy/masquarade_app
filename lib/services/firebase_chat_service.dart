@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:masquarade_app/utils/debug_telegram.dart';
+import 'package:tankograd/utils/debug_telegram.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class FirebaseChatService {

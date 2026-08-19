@@ -1,5 +1,5 @@
 import 'package:equatable/equatable.dart';
-import 'package:masquarade_app/models/domain_model.dart';
+import 'package:tankograd/models/domain_model.dart';
 
 abstract class DomainState extends Equatable {
   const DomainState();

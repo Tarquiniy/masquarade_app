@@ -1,6 +1,6 @@
 import 'package:equatable/equatable.dart';
-import 'package:masquarade_app/models/domain_model.dart';
-import 'package:masquarade_app/models/profile_model.dart';
+import 'package:tankograd/models/domain_model.dart';
+import 'package:tankograd/models/profile_model.dart';
 
 abstract class DomainEvent extends Equatable {
   const DomainEvent();
