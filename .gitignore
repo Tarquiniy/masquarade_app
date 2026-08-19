@@ -58,3 +58,6 @@ __pycache__/
 *.py[cod]
 venv/
 .venv/
+
+# Flutter environment config (contains secrets)
+lib/env.dart

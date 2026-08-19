@@ -95,18 +95,31 @@ flutter build web --release
 
 ### Environment Variables
 
-Copy `.env.example` to `.env` and fill in all values:
+**Flutter app** — credentials live in `lib/env.dart` (excluded from git):
+
+```bash
+cp lib/env.dart.example lib/env.dart
+# then fill in your values
+```
+
+**Python bots** — credentials are loaded from a `.env` file:
 
 ```bash
 cp .env.example .env
+# then fill in your values
 ```
 
-| Variable | Description |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | Bot token from [@BotFather](https://t.me/BotFather) |
-| `SUPABASE_URL` | Your Supabase project URL |
-| `SUPABASE_KEY` | Supabase service-role key (keep secret!) |
-| `PG_DSN` | PostgreSQL connection string (for `telegram_bot_psycopg2.py`) |
+| Variable | Used by | Description |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | `bot.py` | Bot token from [@BotFather](https://t.me/BotFather) |
+| `SUPABASE_URL` | `bot.py` | Supabase project URL |
+| `SUPABASE_KEY` | `bot.py` | Supabase service-role key |
+| `PG_DSN` | `telegram_bot_psycopg2.py` | PostgreSQL connection string |
+| `supabase_url` | `lib/env.dart` | Supabase project URL |
+| `supabase_anonKey` | `lib/env.dart` | Supabase anon key (RLS enforced) |
+| `supabase_serviceKey` | `lib/env.dart` | Supabase service-role key (storage) |
+| `firebase_*` | `lib/env.dart` | Firebase web config (public) |
+| `telegramNotificationBotToken` | `lib/env.dart` | Telegram bot token for direct notifications |
 
 ### Python Telegram Bots
 
@@ -188,10 +201,11 @@ The app includes icons for all nine playable clans:
 
 ## Security Notes
 
-- **Never commit** `.env` or any file containing credentials. The `.gitignore` is configured to exclude `.env*` files.
-- The Supabase **service-role key** has full database access — treat it as a root password.
-- The `SUPABASE_KEY` in the Flutter app should use the **anon key** (row-level security enforced), not the service-role key.
-- Supabase Edge Function secrets are stored securely in the Supabase vault and never exposed to the client.
+- **Never commit** `.env`, `lib/env.dart`, or any file containing credentials. Both are excluded via `.gitignore`.
+- The Supabase **service-role key** bypasses RLS — treat it as a root password.
+- The Flutter app uses the **anon key** for general access (RLS enforced) and the service-role key only in `MediaService` for storage uploads.
+- Supabase Edge Function secrets (`TELEGRAM_*`) are stored in the Supabase vault via `supabase secrets set` and never exposed to clients.
+- Firebase API keys are safe to expose in client code — access is controlled by Firebase Security Rules.
 
 ---
 

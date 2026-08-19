@@ -213,12 +213,12 @@ Future<void> main() async {
     try {
       await Firebase.initializeApp(
         options: const FirebaseOptions(
-          apiKey: "AIzaSyCpQyNCQYkSajBX5Wr8Ii9wlDP4nX6wchE",
-          authDomain: "tankograd.firebaseapp.com",
-          projectId: "tankograd",
-          storageBucket: "tankograd.firebasestorage.app",
-          messagingSenderId: "255328966030",
-          appId: "1:255328966030:web:dd88de76c1a68c6cdf80df",
+          apiKey: firebase_apiKey,
+          authDomain: firebase_authDomain,
+          projectId: firebase_projectId,
+          storageBucket: firebase_storageBucket,
+          messagingSenderId: firebase_messagingSenderId,
+          appId: firebase_appId,
         ),
       );
     } catch (e) {
