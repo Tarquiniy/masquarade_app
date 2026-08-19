@@ -32,7 +32,6 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
-lib/env.dart
 
 # Symbolication related
 app.*.symbols
@@ -60,4 +59,3 @@ venv/
 .venv/
 
 # Flutter environment config (contains secrets)
-lib/env.dart
