@@ -1,4 +1,5 @@
-import psycopg2
+import os
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from aiogram import Bot, Dispatcher, Router
@@ -6,10 +7,28 @@ from aiogram.enums import ParseMode
 from aiogram.types import Message
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
+from dotenv import load_dotenv
 import asyncio
+import psycopg2
 
-TOKEN = "7594245609:AAGK4IWj3G9zJf1HY1B2p6XGBEHF1AbLOa4"
-PG_DSN = "dbname='postgres' user='postgres.pedqpjmdhkcdssfshpzb' password='LinaGideon13!' host='aws-0-ap-southeast-1.pooler.supabase.com' port='6543'"
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+load_dotenv()
+
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+PG_DSN = os.getenv('PG_DSN')
+
+if not TOKEN:
+    logger.error("TELEGRAM_BOT_TOKEN is not set")
+    raise SystemExit(1)
+
+if not PG_DSN:
+    logger.error("PG_DSN is not set")
+    raise SystemExit(1)
 
 bot = Bot(
     token=TOKEN,
@@ -19,15 +38,20 @@ dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 dp.include_router(router)
 
-def generate_code():
+
+def generate_code() -> str:
     return secrets.token_hex(4).upper()
+
 
 @router.message()
 async def greet_or_start(message: Message):
     if message.text and message.text.startswith("/start"):
         await handle_start_command(message)
     else:
-        await message.answer("Приветствую! ✨\nВведите команду /start, чтобы авторизоваться и получить код.")
+        await message.answer(
+            "Приветствую! ✨\nВведите команду /start, чтобы авторизоваться и получить код."
+        )
+
 
 async def handle_start_command(message: Message):
     user = message.from_user
@@ -50,17 +74,19 @@ async def handle_start_command(message: Message):
         profile_row = cur.fetchone()
 
         if not profile_row:
-            await message.answer("Профиль с вашим Telegram username не найден.\nОбратитесь к администратору.");
+            await message.answer(
+                "Профиль с вашим Telegram username не найден.\nОбратитесь к администратору."
+            )
             cur.close()
             conn.close()
             return
 
         cur.execute(
-            '''
-INSERT INTO login_codes (code, telegram_id, external_name, expires_at)
+            """
+            INSERT INTO login_codes (code, telegram_id, external_name, expires_at)
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (code) DO NOTHING;
-            ''',
+            """,
             (code, telegram_id, username, datetime.now(timezone.utc) + timedelta(minutes=10))
         )
         conn.commit()
@@ -72,10 +98,13 @@ INSERT INTO login_codes (code, telegram_id, external_name, expires_at)
             f"Введите его в приложении в течение 10 минут."
         )
     except Exception as e:
+        logger.error(f"Database error in handle_start_command: {e}")
         await message.answer(f"Ошибка при генерации кода: {e}")
 
+
 async def main():
-    await dp.start_polling(bot) # type: ignore
+    await dp.start_polling(bot)  # type: ignore
+
 
 if __name__ == "__main__":
     asyncio.run(main())

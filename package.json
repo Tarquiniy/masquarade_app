@@ -1,4 +1,14 @@
 {
+  "name": "tankograd",
+  "version": "1.0.0",
+  "description": "Vampire: The Masquerade LARP companion app — Tankograd",
+  "private": true,
+  "scripts": {
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:functions:serve": "supabase functions serve",
+    "supabase:functions:deploy": "supabase functions deploy sendTelegram"
+  },
   "dependencies": {
     "supabase": "^2.40.7"
   }
